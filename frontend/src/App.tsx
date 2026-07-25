@@ -50,7 +50,6 @@ type Status =
 export function App() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [activeTarget, setActiveTarget] = useState<string | null>(null);
-  const [terminalSize, setTerminalSize] = useState({ cols: 80, rows: 24 });
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
   const [touchPointer] = useState(hasTouchPointer);
   const [terminalFocused, setTerminalFocused] = useState(false);
@@ -236,12 +235,6 @@ export function App() {
           </p>
         )}
         <div className="terminal-frame" aria-label="SSH terminal">
-          <div className="terminal-frame__bar" aria-hidden="true">
-            <span className="terminal-frame__title">{activeTarget ?? "No active session"}</span>
-            <span className="terminal-frame__dims">
-              {terminalSize.cols}&times;{terminalSize.rows}
-            </span>
-          </div>
           <div className="terminal-frame__viewport">
             <Terminal
               onReady={(controls) => {
@@ -250,13 +243,9 @@ export function App() {
               onInput={sendInput}
               onFocusChange={setTerminalFocused}
               onResize={(cols, rows) => {
+                // Held in a ref rather than state: nothing on the page displays
+                // the geometry, and a re-fit must not cost a render.
                 terminalSizeRef.current = { cols, rows };
-                // Returning the previous object when nothing changed lets React
-                // bail out, so a re-fit that lands on the same geometry does not
-                // re-render (and cannot loop if onResize fires during a render).
-                setTerminalSize((previous) =>
-                  previous.cols === cols && previous.rows === rows ? previous : { cols, rows },
-                );
                 handleRef.current?.resize(cols, rows);
               }}
               fontSize={terminalSettings.fontSize}

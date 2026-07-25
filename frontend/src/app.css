@@ -26,9 +26,7 @@
   /* The terminal bezel is tuned to the Tokyo Night default so the chrome and
      the screen read as one instrument rather than two stacked panels. */
   --terminal-shell: #1a1b26;
-  --terminal-bar: #16161e;
   --terminal-border: #2a2e42;
-  --terminal-label: #7f88a8;
   --brand-mark: #2a2e42;
   --brand-mark-text: #f8f9ff;
   --lamp-idle: #8a9490;
@@ -307,7 +305,7 @@ h2 {
 .terminal-frame {
   display: grid;
   grid-area: 1 / 1;
-  grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -315,36 +313,6 @@ h2 {
   border-radius: 12px;
   background: var(--terminal-shell);
   box-shadow: 0 18px 48px rgb(14 15 27 / 0.18);
-}
-
-.terminal-frame__bar {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--terminal-border);
-  color: #aab4ae;
-  background: var(--terminal-bar);
-  font-family: var(--mono);
-  font-size: 0.68rem;
-}
-
-.terminal-frame__title {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--terminal-label);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Live PTY geometry. Tabular figures stop the readout jittering as it counts. */
-.terminal-frame__dims {
-  flex: none;
-  color: var(--terminal-label);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
 }
 
 .terminal-frame__viewport {
@@ -1022,20 +990,15 @@ h2 {
   }
 
   /* Screen area is the scarce resource on a phone: drop the bezel and let the
-     terminal run to the edges, keeping only the readout strip. */
+     terminal run to the edges. */
   .workspace {
     padding: 0;
   }
 
   .terminal-frame {
-    grid-template-rows: 30px minmax(0, 1fr);
     border: 0;
     border-radius: 0;
     box-shadow: none;
-  }
-
-  .terminal-frame__bar {
-    padding: 0 10px;
   }
 
   .terminal-frame__viewport {
