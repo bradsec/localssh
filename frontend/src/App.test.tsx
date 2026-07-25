@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App.js";
 import { APP_VERSION } from "./appVersion.js";
@@ -16,15 +16,11 @@ const terminalReset = vi.fn();
 const terminalFocus = vi.fn();
 const terminalBlur = vi.fn();
 let terminalActive = false;
-// The real terminal reports focus from the textarea's own events; the mock lets a
-// test drive that callback to stand in for the browser moving focus.
-let reportTerminalFocus: ((focused: boolean) => void) | undefined;
 
 vi.mock("./components/Terminal.js", () => ({
   Terminal: ({
     onResize,
     onReady,
-    onFocusChange,
     active,
   }: {
     onResize?: (cols: number, rows: number) => void;
@@ -34,11 +30,9 @@ vi.mock("./components/Terminal.js", () => ({
       focus: () => void;
       blur: () => void;
     }) => void;
-    onFocusChange?: (focused: boolean) => void;
     active: boolean;
   }) => {
     terminalActive = active;
-    reportTerminalFocus = onFocusChange;
     onResize?.(48, 20);
     onReady?.({
       write: vi.fn(),
@@ -57,7 +51,6 @@ describe("App", () => {
     terminalFocus.mockClear();
     terminalBlur.mockClear();
     terminalActive = false;
-    reportTerminalFocus = undefined;
     localStorage.clear();
   });
 
@@ -146,32 +139,6 @@ describe("App", () => {
     expect(terminalReset).toHaveBeenCalled();
   });
 
-  // On a phone the terminal is the only place to type, and nothing else on the
-  // page can give it focus once the connect form is gone.
-  it("focuses and blurs the terminal from the keyboard button", async () => {
-    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
-    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
-
-    render(<App />);
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(/^host$/i), "10.0.0.11");
-    await user.type(screen.getByLabelText(/^username$/i), "admin");
-    await user.type(screen.getByLabelText(/^password$/i), "secret");
-    await user.click(screen.getByRole("button", { name: /^connect$/i }));
-
-    const button = await screen.findByRole("button", { name: /^keyboard$/i });
-    terminalFocus.mockClear();
-    await user.click(button);
-    expect(terminalFocus).toHaveBeenCalled();
-
-    act(() => reportTerminalFocus?.(true));
-    const hide = screen.getByRole("button", { name: /hide keyboard/i });
-    expect(hide).toHaveAttribute("aria-pressed", "true");
-
-    await user.click(hide);
-    expect(terminalBlur).toHaveBeenCalled();
-  });
-
   // The shell follows the visual viewport only during a session. Doing it while
   // the connect form is up leaves empty canvas below the shell, and the browser
   // pans into it when it lifts a focused field above the keyboard.
@@ -201,11 +168,6 @@ describe("App", () => {
   it("shows the running version on the connect panel", () => {
     render(<App />);
     expect(screen.getByText(`localssh ${APP_VERSION}`)).toBeInTheDocument();
-  });
-
-  it("hides the keyboard button while no session is connected", () => {
-    render(<App />);
-    expect(screen.queryByRole("button", { name: /keyboard/i })).not.toBeInTheDocument();
   });
 
   it("remembers only the host and port when the toggle is enabled", async () => {

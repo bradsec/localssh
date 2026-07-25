@@ -17,9 +17,6 @@ export interface TerminalProps {
   onReady: (controls: TerminalControls) => void;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
-  /** Reports whether the terminal holds focus, so the keyboard button can
-   * label itself for what the next tap will do. */
-  onFocusChange?: (focused: boolean) => void;
   fontSize: number;
   fontFamily: string;
   theme: ITheme;
@@ -30,7 +27,6 @@ export function Terminal({
   onReady,
   onInput,
   onResize,
-  onFocusChange,
   fontSize,
   fontFamily,
   theme,
@@ -39,12 +35,6 @@ export function Terminal({
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  // Read inside listeners that are attached once, so they never go stale.
-  const onFocusChangeRef = useRef(onFocusChange);
-
-  useEffect(() => {
-    onFocusChangeRef.current = onFocusChange;
-  }, [onFocusChange]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -76,11 +66,6 @@ export function Terminal({
       blur: () => term.blur(),
     });
 
-    const reportFocus = () => onFocusChangeRef.current?.(true);
-    const reportBlur = () => onFocusChangeRef.current?.(false);
-    term.textarea?.addEventListener("focus", reportFocus);
-    term.textarea?.addEventListener("blur", reportBlur);
-
     let animationFrame = 0;
     const fitTerminal = () => {
       cancelAnimationFrame(animationFrame);
@@ -104,8 +89,6 @@ export function Terminal({
       observer.disconnect();
       window.visualViewport?.removeEventListener("resize", fitTerminal);
       detachGestures();
-      term.textarea?.removeEventListener("focus", reportFocus);
-      term.textarea?.removeEventListener("blur", reportBlur);
       dataSubscription.dispose();
       resizeSubscription.dispose();
       term.dispose();

@@ -355,19 +355,6 @@ h2 {
   font-size: 16px;
 }
 
-/* Only a touch device needs a button to summon its keyboard. Coarse pointer is
-   the test rather than width alone, so a phone held in landscape (wider than the
-   phone breakpoint) keeps the button, while a desktop never shows it. */
-.keyboard-toggle {
-  display: none;
-}
-
-@media (pointer: coarse), (max-width: 720px) {
-  .keyboard-toggle {
-    display: grid;
-  }
-}
-
 .terminal .xterm-viewport {
   background-color: var(--terminal-background, var(--terminal-shell)) !important;
   overscroll-behavior: contain;

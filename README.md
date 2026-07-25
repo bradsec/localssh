@@ -250,11 +250,8 @@ scroll wheel. The terminal reports its fitted size to the remote PTY, so resizin
 the window, rotating a phone, or opening an on-screen keyboard keeps width-aware
 commands formatting correctly.
 
-On a touch device the toolbar shows a **Keyboard** button while a session is
-connected, which raises and dismisses the on-screen keyboard. Tapping the
-terminal also raises it. The button exists because a browser opens the keyboard
-only for a deliberate action on a real control, and it is the reliable way back
-to typing after the keyboard has been dismissed.
+On a touch device, tapping the terminal raises the on-screen keyboard, and
+dismissing it is left to the keyboard's own control.
 
 Touch gestures, for devices with no physical Tab or arrow keys:
 

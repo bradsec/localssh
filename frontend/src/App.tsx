@@ -32,7 +32,6 @@ export function App() {
   const [activeTarget, setActiveTarget] = useState<string | null>(null);
   const [terminalSize, setTerminalSize] = useState({ cols: 80, rows: 24 });
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const handleRef = useRef<SshHandle | null>(null);
   const terminalControlsRef = useRef<TerminalControls | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
@@ -50,15 +49,6 @@ export function App() {
     setTerminalSettings(next);
     saveTerminalSettings(next);
   }, []);
-
-  // Safari raises the on-screen keyboard only for a focus() call made inside a
-  // user gesture, so this runs straight off the click with nothing awaited.
-  const toggleKeyboard = useCallback(() => {
-    const controls = terminalControlsRef.current;
-    if (!controls) return;
-    if (keyboardOpen) controls.blur();
-    else controls.focus();
-  }, [keyboardOpen]);
 
   const attemptConnect = useCallback(async (values: ConnectFormValues) => {
     setStatus({ kind: "connecting" });
@@ -149,20 +139,9 @@ export function App() {
         </div>
         <div className="toolbar-actions">
           {status.kind === "connected" && (
-            <>
-              {/* Hidden on a desktop by CSS: a physical keyboard needs no button. */}
-              <button
-                className="toolbar-button keyboard-toggle"
-                type="button"
-                onClick={toggleKeyboard}
-                aria-pressed={keyboardOpen}
-              >
-                {keyboardOpen ? "Hide keyboard" : "Keyboard"}
-              </button>
-              <button className="toolbar-button" type="button" onClick={disconnect}>
-                Disconnect
-              </button>
-            </>
+            <button className="toolbar-button" type="button" onClick={disconnect}>
+              Disconnect
+            </button>
           )}
           <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
           <About />
@@ -201,7 +180,6 @@ export function App() {
                 );
                 handleRef.current?.resize(cols, rows);
               }}
-              onFocusChange={setKeyboardOpen}
               fontSize={terminalSettings.fontSize}
               fontFamily={terminalSettings.fontFamily}
               theme={terminalTheme}
