@@ -51,6 +51,11 @@ body,
   min-width: 320px;
   height: 100%;
   margin: 0;
+  /* Safari on a phone inflates text on its own judgement. The terminal measures
+     a character to build its cell grid, so any inflation it did not ask for puts
+     glyphs and cells at different sizes and the row spacing goes visibly wrong. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {

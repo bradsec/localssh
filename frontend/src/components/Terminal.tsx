@@ -103,7 +103,16 @@ export function Terminal({
     if (!termRef.current) return;
     termRef.current.options.fontSize = fontSize;
     termRef.current.options.fontFamily = fontFamily;
-    requestAnimationFrame(() => fitRef.current?.fit());
+    // The DOM renderer fakes a monospace grid with a letter-spacing correction
+    // derived from the measured character width, and it recomputes that only when
+    // it repaints. A fit() that lands on the same column count raises no resize,
+    // so the correction for the previous font size would survive the change and
+    // leave the row visibly mis-spaced. Repainting every row re-derives it.
+    requestAnimationFrame(() => {
+      fitRef.current?.fit();
+      const term = termRef.current;
+      if (term) term.refresh(0, term.rows - 1);
+    });
   }, [fontSize, fontFamily]);
 
   useEffect(() => {
