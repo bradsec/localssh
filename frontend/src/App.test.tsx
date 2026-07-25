@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App.js";
 import { APP_VERSION } from "./appVersion.js";
@@ -16,11 +16,14 @@ const terminalReset = vi.fn();
 const terminalFocus = vi.fn();
 const terminalBlur = vi.fn();
 let terminalActive = false;
+// The handle the real terminal hands out, so a test can type into the session.
+let terminalInput: ((data: string) => void) | undefined;
 
 vi.mock("./components/Terminal.js", () => ({
   Terminal: ({
     onResize,
     onReady,
+    onInput,
     active,
   }: {
     onResize?: (cols: number, rows: number) => void;
@@ -29,20 +32,55 @@ vi.mock("./components/Terminal.js", () => ({
       reset: () => void;
       focus: () => void;
       blur: () => void;
+      applicationCursorMode: () => boolean;
     }) => void;
+    onInput?: (data: string) => void;
     active: boolean;
   }) => {
     terminalActive = active;
+    terminalInput = onInput;
     onResize?.(48, 20);
     onReady?.({
       write: vi.fn(),
       reset: terminalReset,
       focus: terminalFocus,
       blur: terminalBlur,
+      applicationCursorMode: () => false,
     });
     return <div aria-label="SSH terminal emulator" />;
   },
 }));
+
+/** Reports the pointer the media query in App asks about. */
+function usePointer(kind: "coarse" | "fine") {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes(kind),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
+/** Fills in the connect form and waits for the session to be up. */
+async function connect(user: ReturnType<typeof userEvent.setup>, host: string) {
+  await user.type(screen.getByLabelText(/^host$/i), host);
+  await user.type(screen.getByLabelText(/^username$/i), "admin");
+  await user.type(screen.getByLabelText(/^password$/i), "secret");
+  await user.click(screen.getByRole("button", { name: /^connect$/i }));
+  await screen.findByRole("button", { name: /disconnect/i });
+}
+
+function sentBytes(handle: engine.SshHandle): string {
+  const decoder = new TextDecoder();
+  return vi
+    .mocked(handle.write)
+    .mock.calls.map(([chunk]) => decoder.decode(chunk))
+    .join("");
+}
 
 describe("App", () => {
   beforeEach(() => {
@@ -51,6 +89,8 @@ describe("App", () => {
     terminalFocus.mockClear();
     terminalBlur.mockClear();
     terminalActive = false;
+    terminalInput = undefined;
+    usePointer("fine");
     localStorage.clear();
   });
 
@@ -223,6 +263,106 @@ describe("App", () => {
     expect(screen.getByLabelText(/font family/i)).toHaveValue('"JetBrains Mono", monospace');
     expect(screen.getByLabelText(/color scheme/i)).toHaveValue("Nord");
     expect(screen.getByLabelText(/font size/i)).toHaveValue("18");
+  });
+
+  // The bar stands in for keys the touch device has no other way to send, so it
+  // belongs to a running session on such a device whether or not the on-screen
+  // keyboard happens to be open.
+  it("shows the key bar for a touch session and takes it away with the session", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    expect(screen.queryByRole("toolbar", { name: /terminal keys/i })).not.toBeInTheDocument();
+
+    await connect(user, "10.0.0.20");
+    expect(screen.getByRole("toolbar", { name: /terminal keys/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /disconnect/i }));
+    expect(screen.queryByRole("toolbar", { name: /terminal keys/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the key bar off a device with a pointer that is not a finger", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    await connect(userEvent.setup(), "10.0.0.21");
+
+    expect(screen.queryByRole("toolbar", { name: /terminal keys/i })).not.toBeInTheDocument();
+  });
+
+  // The point of Enter on the bar: recall a command and run it without ever
+  // opening the on-screen keyboard.
+  it("recalls and runs a command from the bar alone", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.25");
+
+    await user.click(screen.getByRole("button", { name: /up arrow/i }));
+    await user.click(screen.getByRole("button", { name: /^enter$/i }));
+
+    expect(sentBytes(handle)).toBe("\x1b[A\r");
+  });
+
+  it("sends a key from the bar to the session", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.22");
+
+    await user.click(screen.getByRole("button", { name: /control c/i }));
+    await user.click(screen.getByRole("button", { name: /up arrow/i }));
+
+    expect(sentBytes(handle)).toBe("\x03\x1b[A");
+  });
+
+  // The point of the sticky modifier: the letter comes from the system keyboard,
+  // which has no Ctrl of its own.
+  it("turns the next typed character into a control code after ctrl is tapped", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.23");
+
+    await user.click(screen.getByRole("button", { name: /^ctrl$/i }));
+    act(() => terminalInput?.("r"));
+    act(() => terminalInput?.("r"));
+
+    expect(sentBytes(handle)).toBe("\x12r");
+  });
+
+  it("holds ctrl down until it is tapped off once it is locked", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.24");
+
+    const ctrl = screen.getByRole("button", { name: /^ctrl$/i });
+    await user.click(ctrl);
+    await user.click(ctrl);
+    act(() => terminalInput?.("a"));
+    act(() => terminalInput?.("b"));
+    await user.click(ctrl);
+    act(() => terminalInput?.("c"));
+
+    expect(sentBytes(handle)).toBe("\x01\x02c");
+    expect(ctrl).toHaveAttribute("aria-pressed", "false");
   });
 
   it("ignores invalid persisted terminal settings", () => {

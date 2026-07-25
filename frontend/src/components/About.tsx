@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { APP_VERSION } from "../appVersion.js";
 
 const REPOSITORY_URL = "https://github.com/bradsec/localssh";
 
@@ -44,6 +45,8 @@ export function About() {
           host-key decisions never reach a server.
         </p>
         <dl className="about__meta">
+          <dt>Version</dt>
+          <dd>{APP_VERSION}</dd>
           <dt>Created by</dt>
           <dd>Mark Bradley (BRADSEC)</dd>
         </dl>

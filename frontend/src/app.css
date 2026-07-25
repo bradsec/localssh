@@ -61,6 +61,10 @@ body,
 body {
   min-height: 100dvh;
   overflow: hidden;
+  /* A rubber-band drag at the end of the page moves the visual viewport, which
+     the session shell is pinned to, so the whole shell jitters under the touch
+     that was meant for the terminal's own scrollback. */
+  overscroll-behavior: none;
 }
 
 button,
@@ -124,16 +128,26 @@ h2 {
   background: var(--canvas);
 }
 
-/* Only a running session follows the visual viewport (--app-height, published by
-   App.tsx). The terminal then refits into the space the on-screen keyboard
-   leaves, and because it fills the shell its cursor row stays above the keyboard.
-   The connect form keeps the full layout viewport on purpose: a browser pans the
-   page to lift a focused field above the keyboard, and a shell shorter than the
-   layout viewport gives it empty canvas to pan into, which reads as the form
-   disappearing behind a blank area. */
+/* Only a running session follows the visual viewport (--app-height and
+   --app-viewport-offset, published by App.tsx). The terminal then refits into
+   the space the on-screen keyboard leaves, and because it fills the shell its
+   cursor row stays above the keyboard.
+
+   Fixed to the offset rather than laid out from the top of the page, because
+   Safari pans the page to lift a focused field clear of the keyboard: a shell
+   shorter than the layout viewport gives it empty canvas to pan into, which
+   shows as a band of bare canvas between the terminal and the keyboard. Pinning
+   the shell to the visual viewport takes that pan back, and with nothing left in
+   the page flow there is no longer anything to pan.
+
+   The connect form keeps the full layout viewport on purpose: there the pan is
+   what lifts the field being filled in above the keyboard. */
 .app-shell--session {
+  position: fixed;
+  top: var(--app-viewport-offset, 0px);
+  left: 0;
   height: var(--app-height, 100dvh);
-  min-height: var(--app-height, 100dvh);
+  min-height: 0;
 }
 
 .app-toolbar {
@@ -364,6 +378,72 @@ h2 {
   background-color: var(--terminal-background, var(--terminal-shell)) !important;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+/* The keys an on-screen keyboard has none of, as a strip along the bottom of the
+   shell and so directly above the keyboard. It scrolls sideways rather than
+   wrapping or shrinking its keys: a row that reflows moves keys out from under
+   the thumb that was aiming for them. */
+.key-bar {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  padding:
+    6px
+    max(8px, env(safe-area-inset-right))
+    max(6px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+  overflow-x: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.key-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.key-bar__key {
+  flex: none;
+  min-width: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.key-bar__key--glyph {
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.key-bar__key:active {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+/* An armed modifier and a held one have to be told apart at a glance, since one
+   survives the next key press and the other does not. */
+.key-bar__key--once {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.key-bar__key--locked {
+  color: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent);
 }
 
 .connect-panel {
@@ -813,6 +893,12 @@ h2 {
   color: var(--text);
   font-size: 0.83rem;
   font-weight: 650;
+}
+
+/* The list gap belongs inside a term and its value, so a following term needs
+   its own space to keep the pairs apart. */
+.about__meta dd + dt {
+  margin-top: 10px;
 }
 
 .about__link {

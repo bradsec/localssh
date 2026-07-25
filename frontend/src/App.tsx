@@ -2,16 +2,36 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { About } from "./components/About.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
+import { KeyBar } from "./components/KeyBar.js";
 import { Terminal, type TerminalControls } from "./components/Terminal.js";
 import { TerminalSettings as TerminalSettingsControl } from "./components/TerminalSettings.js";
 import { connectSession, HostKeyRejectedError, type SshHandle } from "./ssh/engine.js";
 import { loadKnownHosts, trustHostKey } from "./storage/knownHostsStore.js";
 import { loadTerminalSettings, saveTerminalSettings } from "./storage/settingsStore.js";
+import { lockPageScroll } from "./pageScrollLock.js";
 import { resolveRelayWsUrl } from "./relayUrl.js";
+import {
+  applyModifiers,
+  cycleModifier,
+  keySequence,
+  NO_MODIFIERS,
+  type ModifierName,
+  type ModifierState,
+  type TerminalKey,
+} from "./terminalKeys.js";
 import { DEFAULT_THEME_NAME, TERMINAL_THEMES } from "./terminalThemes.js";
 import { trackViewportHeight } from "./viewportHeight.js";
 
 const RELAY_WS_URL = resolveRelayWsUrl(import.meta.env.VITE_RELAY_WS_URL, window.location);
+const ENCODER = new TextEncoder();
+
+/**
+ * Whether the primary pointer is a finger. The key bar stands in for keys an
+ * on-screen keyboard lacks, so it belongs only to devices driven by touch.
+ */
+function hasTouchPointer(): boolean {
+  return window.matchMedia?.("(pointer: coarse)").matches ?? false;
+}
 
 type Status =
   | { kind: "idle" }
@@ -32,9 +52,47 @@ export function App() {
   const [activeTarget, setActiveTarget] = useState<string | null>(null);
   const [terminalSize, setTerminalSize] = useState({ cols: 80, rows: 24 });
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
+  const [touchPointer] = useState(hasTouchPointer);
+  const [modifiers, setModifiers] = useState<ModifierState>(NO_MODIFIERS);
   const handleRef = useRef<SshHandle | null>(null);
   const terminalControlsRef = useRef<TerminalControls | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
+  // Input arrives from the terminal outside React's render cycle, so the armed
+  // modifiers are held in a ref and mirrored into state for the key bar.
+  const modifiersRef = useRef<ModifierState>(NO_MODIFIERS);
+
+  const updateModifiers = useCallback((next: ModifierState) => {
+    modifiersRef.current = next;
+    setModifiers(next);
+  }, []);
+
+  /** Sends input to the session, applying whichever modifiers are armed. */
+  const sendInput = useCallback(
+    (data: string) => {
+      const { data: outgoing, next } = applyModifiers(data, modifiersRef.current);
+      updateModifiers(next);
+      handleRef.current?.write(ENCODER.encode(outgoing));
+    },
+    [updateModifiers],
+  );
+
+  const sendKey = useCallback(
+    (key: TerminalKey) => {
+      const applicationCursorKeys = terminalControlsRef.current?.applicationCursorMode() ?? false;
+      sendInput(keySequence(key, applicationCursorKeys));
+    },
+    [sendInput],
+  );
+
+  const toggleModifier = useCallback(
+    (name: ModifierName) => {
+      updateModifiers({
+        ...modifiersRef.current,
+        [name]: cycleModifier(modifiersRef.current[name]),
+      });
+    },
+    [updateModifiers],
+  );
 
   // Publishes the visual viewport height for the stylesheet. Only a connected
   // session consumes it: see .app-shell--session for why the connect form must
@@ -44,6 +102,14 @@ export function App() {
     if (!viewport) return;
     return trackViewportHeight(viewport, document.documentElement);
   }, []);
+
+  // Only during a session: the connect form is a page that may need panning to
+  // put a field above the keyboard, while the session fills the screen exactly
+  // and any pan of it just slides the terminal away.
+  useEffect(() => {
+    if (status.kind !== "connected") return;
+    return lockPageScroll(document);
+  }, [status.kind]);
 
   const updateTerminalSettings = useCallback((next: typeof terminalSettings) => {
     setTerminalSettings(next);
@@ -72,6 +138,7 @@ export function App() {
           // keyboard does not sit over the connect form.
           terminalControlsRef.current?.reset();
           terminalControlsRef.current?.blur();
+          updateModifiers(NO_MODIFIERS);
           setStatus({ kind: "idle" });
         },
       });
@@ -98,7 +165,7 @@ export function App() {
         });
       }
     }
-  }, []);
+  }, [updateModifiers]);
 
   const trustAndRetry = useCallback(async () => {
     if (status.kind !== "unknown-host") return;
@@ -117,8 +184,9 @@ export function App() {
     setActiveTarget(null);
     terminalControlsRef.current?.reset();
     terminalControlsRef.current?.blur();
+    updateModifiers(NO_MODIFIERS);
     setStatus({ kind: "idle" });
-  }, []);
+  }, [updateModifiers]);
 
   return (
     <main className={status.kind === "connected" ? "app-shell app-shell--session" : "app-shell"}>
@@ -169,7 +237,7 @@ export function App() {
               onReady={(controls) => {
                 terminalControlsRef.current = controls;
               }}
-              onInput={(data) => handleRef.current?.write(new TextEncoder().encode(data))}
+              onInput={sendInput}
               onResize={(cols, rows) => {
                 terminalSizeRef.current = { cols, rows };
                 // Returning the previous object when nothing changed lets React
@@ -188,6 +256,15 @@ export function App() {
           </div>
         </div>
       </div>
+
+      {/* The bar rides on the shell, which is pinned to the visual viewport, so
+          it sits directly above the on-screen keyboard whenever that is open.
+          It stays up when the keyboard is not: its keys write to the session
+          without going through the terminal's focus, so a previous command can
+          be recalled and run from the bar alone. */}
+      {status.kind === "connected" && touchPointer && (
+        <KeyBar modifiers={modifiers} onToggleModifier={toggleModifier} onKey={sendKey} />
+      )}
 
       {status.kind === "unknown-host" && (
         <HostKeyPrompt

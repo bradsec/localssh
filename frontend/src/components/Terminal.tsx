@@ -22,6 +22,8 @@ export interface TerminalControls {
   focus: () => void;
   /** Drops focus, which is what dismisses a phone's on-screen keyboard. */
   blur: () => void;
+  /** Whether cursor keys currently take their application encoding. */
+  applicationCursorMode: () => boolean;
 }
 
 export interface TerminalProps {
@@ -76,6 +78,7 @@ export function Terminal({
       reset: () => term.reset(),
       focus: () => term.focus(),
       blur: () => term.blur(),
+      applicationCursorMode: () => isApplicationCursorMode(term),
     });
 
     let animationFrame = 0;

@@ -250,10 +250,43 @@ scroll wheel. The terminal reports its fitted size to the remote PTY, so resizin
 the window, rotating a phone, or opening an on-screen keyboard keeps width-aware
 commands formatting correctly.
 
-On a touch device, tapping the terminal raises the on-screen keyboard, and
+## Phones and tablets
+
+The interface is built for a small touch screen as much as for a desktop
+browser. On a phone the terminal runs to the edges of the screen, the toolbar
+reflows so the session identity keeps its own line, and controls stay at or
+above the 44px touch target. Pinch-zoom is disabled over the terminal, where
+zooming would hide the prompt and reflow nothing: set the font size from the
+Appearance menu instead.
+
+While a session is up, the shell follows the visual viewport rather than the
+page, so the terminal refits into whatever the on-screen keyboard leaves and the
+cursor row stays above it. Tapping the terminal raises the keyboard, and
 dismissing it is left to the keyboard's own control.
 
-Touch gestures, for devices with no physical Tab or arrow keys:
+### Key bar
+
+A touch device gets a key bar along the bottom of the session, carrying the keys
+a phone keyboard has none of. It stays up for the whole session, above the
+on-screen keyboard when that is open and on its own when it is not:
+
+| Keys                       | Notes                                              |
+| -------------------------- | -------------------------------------------------- |
+| `ctrl`, `alt`              | Sticky. One tap arms them for the next key, a second locks them until tapped off. |
+| `↑`, `↓`, `⏎`              | Recall a command and run it without opening the keyboard at all. |
+| `esc`, `tab`               |                                                    |
+| `^C`, `^D`, `^Z`           | Interrupt, end of input, suspend.                  |
+| `←`, `→`, `home`, `end`    | Sent in whichever encoding the terminal is in, so they work inside `vim` and `less`. |
+| `\|`, `/`, `~`, `-`        | Punctuation buried behind a shift on a phone.      |
+
+With `ctrl` armed, a letter typed on the system keyboard arrives as its control
+code, so `ctrl` then `r` is a reverse history search. The bar scrolls sideways
+when the screen is too narrow for all of it, and tapping a key never takes focus
+from the terminal, so the keyboard does not close underneath it.
+
+### Touch gestures
+
+For devices with no physical Tab or arrow keys:
 
 | Gesture            | Action           |
 | ------------------ | ---------------- |
@@ -262,8 +295,7 @@ Touch gestures, for devices with no physical Tab or arrow keys:
 | Flick up or down   | Command history  |
 
 Vertical flicks defer to scrollback: while you are reading history, vertical
-drags scroll normally. Pinch does nothing over the terminal: set the font size
-from the Appearance menu instead.
+drags scroll normally. Dragging with two fingers scrolls the output.
 
 ## Development
 
