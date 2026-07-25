@@ -272,6 +272,7 @@ on-screen keyboard when that is open and on its own when it is not:
 
 | Keys                       | Notes                                              |
 | -------------------------- | -------------------------------------------------- |
+| Keyboard icon              | Raises and dismisses the on-screen keyboard, for reading output on a full screen and typing again without hunting for the terminal. |
 | `ctrl`, `alt`              | Sticky. One tap arms them for the next key, a second locks them until tapped off. |
 | `↑`, `↓`, `⏎`              | Recall a command and run it without opening the keyboard at all. |
 | `esc`, `tab`               |                                                    |

@@ -29,6 +29,13 @@ test("supplies terminal keys for the whole session, keyboard or not", async ({ p
   await expect(terminalInput).toBeFocused();
   await expect(page.locator(".xterm-rows")).toContainText("~", { timeout: 5_000 });
 
+  // The keyboard toggle is the terminal's focus under a button, so it is the
+  // one key on the bar that does take focus away.
+  await page.getByRole("button", { name: /hide keyboard/i }).tap();
+  await expect(terminalInput).not.toBeFocused();
+  await page.getByRole("button", { name: /show keyboard/i }).tap();
+  await expect(terminalInput).toBeFocused();
+
   // Its keys write to the session directly, so they still reach the host with
   // the terminal blurred, which on a phone is the keyboard put away.
   await terminalInput.blur();

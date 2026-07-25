@@ -422,6 +422,24 @@ h2 {
   line-height: 1;
 }
 
+/* The keyboard toggle acts on the page rather than sending anything to the
+   host, so it is given a gap and a firmer edge to keep it out of the run of
+   keys beside it. */
+.key-bar__key--keyboard {
+  display: grid;
+  place-items: center;
+  margin-right: 10px;
+  padding: 0 9px;
+  border-color: var(--border-strong);
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.key-bar__key--keyboard[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .key-bar__key--glyph {
   color: var(--text);
   font-size: 1.05rem;

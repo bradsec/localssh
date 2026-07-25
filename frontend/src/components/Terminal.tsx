@@ -30,6 +30,8 @@ export interface TerminalProps {
   onReady: (controls: TerminalControls) => void;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
+  /** Reports terminal focus, which on a phone is the on-screen keyboard being up. */
+  onFocusChange?: (focused: boolean) => void;
   fontSize: number;
   fontFamily: string;
   theme: ITheme;
@@ -40,6 +42,7 @@ export function Terminal({
   onReady,
   onInput,
   onResize,
+  onFocusChange,
   fontSize,
   fontFamily,
   theme,
@@ -49,6 +52,10 @@ export function Terminal({
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const previousFontSizeRef = useRef(fontSize);
+  // The terminal is built once, so the setup effect reads the current callback
+  // through a ref rather than closing over the one it was mounted with.
+  const onFocusChangeRef = useRef(onFocusChange);
+  onFocusChangeRef.current = onFocusChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -81,6 +88,14 @@ export function Terminal({
       applicationCursorMode: () => isApplicationCursorMode(term),
     });
 
+    // The hidden textarea is the element that holds focus, and on a phone the
+    // on-screen keyboard follows it.
+    const textarea = term.textarea;
+    const reportFocus = () => onFocusChangeRef.current?.(true);
+    const reportBlur = () => onFocusChangeRef.current?.(false);
+    textarea?.addEventListener("focus", reportFocus);
+    textarea?.addEventListener("blur", reportBlur);
+
     let animationFrame = 0;
     const fitTerminal = () => {
       cancelAnimationFrame(animationFrame);
@@ -107,6 +122,8 @@ export function Terminal({
       cancelAnimationFrame(animationFrame);
       observer.disconnect();
       window.visualViewport?.removeEventListener("resize", fitTerminal);
+      textarea?.removeEventListener("focus", reportFocus);
+      textarea?.removeEventListener("blur", reportBlur);
       detachGestures();
       dataSubscription.dispose();
       resizeSubscription.dispose();

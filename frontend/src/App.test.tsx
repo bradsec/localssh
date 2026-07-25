@@ -16,14 +16,17 @@ const terminalReset = vi.fn();
 const terminalFocus = vi.fn();
 const terminalBlur = vi.fn();
 let terminalActive = false;
-// The handle the real terminal hands out, so a test can type into the session.
+// Handles the real terminal hands out, so a test can type into the session and
+// report the focus a phone's keyboard follows.
 let terminalInput: ((data: string) => void) | undefined;
+let terminalFocusChange: ((focused: boolean) => void) | undefined;
 
 vi.mock("./components/Terminal.js", () => ({
   Terminal: ({
     onResize,
     onReady,
     onInput,
+    onFocusChange,
     active,
   }: {
     onResize?: (cols: number, rows: number) => void;
@@ -35,10 +38,12 @@ vi.mock("./components/Terminal.js", () => ({
       applicationCursorMode: () => boolean;
     }) => void;
     onInput?: (data: string) => void;
+    onFocusChange?: (focused: boolean) => void;
     active: boolean;
   }) => {
     terminalActive = active;
     terminalInput = onInput;
+    terminalFocusChange = onFocusChange;
     onResize?.(48, 20);
     onReady?.({
       write: vi.fn(),
@@ -90,6 +95,7 @@ describe("App", () => {
     terminalBlur.mockClear();
     terminalActive = false;
     terminalInput = undefined;
+    terminalFocusChange = undefined;
     usePointer("fine");
     localStorage.clear();
   });
@@ -292,6 +298,28 @@ describe("App", () => {
     await connect(userEvent.setup(), "10.0.0.21");
 
     expect(screen.queryByRole("toolbar", { name: /terminal keys/i })).not.toBeInTheDocument();
+  });
+
+  // Focus is the only handle a page has on the on-screen keyboard, so the
+  // toggle is the terminal's focus put under a button.
+  it("raises and dismisses the keyboard from the bar", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.26");
+    // Connecting focuses the terminal, which is the keyboard coming up.
+    act(() => terminalFocusChange?.(true));
+
+    await user.click(screen.getByRole("button", { name: /hide keyboard/i }));
+    expect(terminalBlur).toHaveBeenCalled();
+
+    act(() => terminalFocusChange?.(false));
+    terminalFocus.mockClear();
+    await user.click(screen.getByRole("button", { name: /show keyboard/i }));
+    expect(terminalFocus).toHaveBeenCalled();
   });
 
   // The point of Enter on the bar: recall a command and run it without ever

@@ -53,6 +53,7 @@ export function App() {
   const [terminalSize, setTerminalSize] = useState({ cols: 80, rows: 24 });
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
   const [touchPointer] = useState(hasTouchPointer);
+  const [terminalFocused, setTerminalFocused] = useState(false);
   const [modifiers, setModifiers] = useState<ModifierState>(NO_MODIFIERS);
   const handleRef = useRef<SshHandle | null>(null);
   const terminalControlsRef = useRef<TerminalControls | null>(null);
@@ -83,6 +84,15 @@ export function App() {
     },
     [sendInput],
   );
+
+  // Focus is the only handle a page has on the on-screen keyboard: the terminal
+  // holding it is what keeps the keyboard up, and dropping it puts it away.
+  const toggleKeyboard = useCallback(() => {
+    const controls = terminalControlsRef.current;
+    if (!controls) return;
+    if (terminalFocused) controls.blur();
+    else controls.focus();
+  }, [terminalFocused]);
 
   const toggleModifier = useCallback(
     (name: ModifierName) => {
@@ -238,6 +248,7 @@ export function App() {
                 terminalControlsRef.current = controls;
               }}
               onInput={sendInput}
+              onFocusChange={setTerminalFocused}
               onResize={(cols, rows) => {
                 terminalSizeRef.current = { cols, rows };
                 // Returning the previous object when nothing changed lets React
@@ -263,7 +274,13 @@ export function App() {
           without going through the terminal's focus, so a previous command can
           be recalled and run from the bar alone. */}
       {status.kind === "connected" && touchPointer && (
-        <KeyBar modifiers={modifiers} onToggleModifier={toggleModifier} onKey={sendKey} />
+        <KeyBar
+          modifiers={modifiers}
+          keyboardUp={terminalFocused}
+          onToggleKeyboard={toggleKeyboard}
+          onToggleModifier={toggleModifier}
+          onKey={sendKey}
+        />
       )}
 
       {status.kind === "unknown-host" && (
