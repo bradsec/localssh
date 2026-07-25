@@ -2,6 +2,7 @@ import { useEffect, useRef, type CSSProperties } from "react";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { classifyGesture, gestureToInput, isTap } from "../terminalGestures.js";
+import { applyFontOptions } from "../terminalFont.js";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalControls {
@@ -101,13 +102,12 @@ export function Terminal({
 
   useEffect(() => {
     if (!termRef.current) return;
-    termRef.current.options.fontSize = fontSize;
-    termRef.current.options.fontFamily = fontFamily;
-    // The DOM renderer fakes a monospace grid with a letter-spacing correction
-    // derived from the measured character width, and it recomputes that only when
-    // it repaints. A fit() that lands on the same column count raises no resize,
-    // so the correction for the previous font size would survive the change and
-    // leave the row visibly mis-spaced. Repainting every row re-derives it.
+    // Re-measures the character cell, which a size change alone does not do.
+    // See terminalFont.ts.
+    applyFontOptions(termRef.current, fontSize, fontFamily);
+    // Then re-fit to the new cell size and repaint every row against it: the
+    // renderer derives its per-row spacing when it draws, and a fit that lands on
+    // the same column count raises no resize of its own to trigger that.
     requestAnimationFrame(() => {
       fitRef.current?.fit();
       const term = termRef.current;
