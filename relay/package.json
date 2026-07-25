@@ -1,7 +1,7 @@
 {
   "name": "relay",
   "private": true,
-  "version": "2026.7.25+revision.4",
+  "version": "2026.7.25+revision.5",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
