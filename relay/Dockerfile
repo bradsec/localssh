@@ -1,4 +1,4 @@
-ARG VERSION=2026.07.25
+ARG VERSION=2026.07.25.1
 
 FROM node:22-alpine AS build
 WORKDIR /app

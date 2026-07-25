@@ -7,9 +7,10 @@ import { TerminalSettings as TerminalSettingsControl } from "./components/Termin
 import { connectSession, HostKeyRejectedError, type SshHandle } from "./ssh/engine.js";
 import { loadKnownHosts, trustHostKey } from "./storage/knownHostsStore.js";
 import { loadTerminalSettings, saveTerminalSettings } from "./storage/settingsStore.js";
+import { resolveRelayWsUrl } from "./relayUrl.js";
 import { DEFAULT_THEME_NAME, TERMINAL_THEMES } from "./terminalThemes.js";
 
-const RELAY_WS_URL = import.meta.env.VITE_RELAY_WS_URL ?? "ws://127.0.0.1:8787";
+const RELAY_WS_URL = resolveRelayWsUrl(import.meta.env.VITE_RELAY_WS_URL, window.location);
 
 type Status =
   | { kind: "idle" }

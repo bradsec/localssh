@@ -56,13 +56,46 @@ docker compose down --rmi all --remove-orphans
 
 These commands do not remove the source checkout or `.env` configuration.
 
-Both published ports bind to `127.0.0.1`, so other machines cannot reach the
-frontend or use the relay. The default relay policy permits any hostname on
-port 22, but only the local frontend origins may open a relay connection.
+The web interface binds to `127.0.0.1` by default. The frontend proxies relay
+traffic internally through the same web port, so the relay does not need a
+separate published port.
+
+### Access from a local network
+
+Give the server a stable LAN address or hostname, then copy and edit the
+configuration:
+
+```bash
+cp .env.example .env
+```
+
+For a server at `192.168.1.20`, use:
+
+```dotenv
+BIND_ADDRESS=0.0.0.0
+FRONTEND_PORT=9080
+ALLOWED_ORIGINS=http://192.168.1.20:9080
+ALLOWED_HOSTS=server.example.com,*.internal.example
+ALLOWED_PORTS=22
+```
+
+Start the application and open <http://192.168.1.20:9080> from another
+computer:
+
+```bash
+docker compose up -d
+```
+
+Allow inbound TCP port `9080` from the trusted LAN in the server firewall.
+Do not expose this HTTP service directly to the internet. Any browser that can
+reach it can use the unauthenticated relay to connect to `ALLOWED_HOSTS`, and
+plain HTTP does not protect the page from modification in transit. Use a
+restrictive target allowlist and put an internet-facing deployment behind an
+authenticated HTTPS reverse proxy.
 
 ### Configuration
 
-Copy the example before changing ports or tightening the target allowlist:
+Copy the example before changing the bind address, port, or target allowlist:
 
 ```bash
 cp .env.example .env
@@ -70,22 +103,19 @@ cp .env.example .env
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
+| `BIND_ADDRESS` | `127.0.0.1` | Host interface for the web port. Use `0.0.0.0` for LAN access. |
 | `FRONTEND_PORT` | `9080` | Host port for the web interface. |
-| `RELAY_PORT` | `8787` | Host port for the WebSocket relay. |
-| `VITE_RELAY_WS_URL` | `ws://127.0.0.1:8787` | Relay URL compiled into the frontend. |
 | `ALLOWED_ORIGINS` | local frontend URLs | Exact browser origins allowed to connect. |
 | `ALLOWED_HOSTS` | `*` | Comma-separated target hosts. `*.example.com` matches subdomains. |
 | `ALLOWED_PORTS` | `22` | Comma-separated target TCP ports. |
 
 `LOCALSSH_VERSION` selects the container image tag. Leave it unset to track the
-latest release, or set it to a release such as `2026.07.25` for repeatable
+latest release, or set it to a release such as `2026.07.25.1` for repeatable
 installs.
 
-If `FRONTEND_PORT` changes, update `ALLOWED_ORIGINS` to match. Changing only
-`FRONTEND_PORT` does not require an image rebuild. If `RELAY_PORT` changes,
-update `VITE_RELAY_WS_URL` and rebuild the frontend because the relay URL is
-compiled into it. For a private set of targets, replace `*` with explicit
-names:
+`ALLOWED_ORIGINS` must contain every exact URL used to open the interface,
+including its scheme, hostname or address, and non-default port. For a private
+set of SSH targets, replace `*` with explicit names:
 
 ```dotenv
 ALLOWED_HOSTS=server.example.com,*.internal.example
@@ -93,47 +123,39 @@ ALLOWED_HOSTS=server.example.com,*.internal.example
 
 ### Changing ports
 
-Edit `.env` and keep the frontend origin and relay URL synchronized with the
-published ports. For example, to use frontend port `9180` and relay port
-`9878`:
+Edit `.env` and keep the allowed origin synchronized with the published web
+port. For example, to use port `9180` locally:
 
 ```dotenv
 FRONTEND_PORT=9180
-RELAY_PORT=9878
-VITE_RELAY_WS_URL=ws://127.0.0.1:9878
 ALLOWED_ORIGINS=http://localhost:9180,http://127.0.0.1:9180
 ```
 
-Rebuild and restart after changing these values:
+Recreate the containers after changing these values:
 
 ```bash
-docker compose up --build -d
+docker compose up -d
 ```
 
-Then open <http://localhost:9180>. `VITE_RELAY_WS_URL` is compiled into the
-frontend image, so `docker compose restart` alone does not apply a relay URL
-change. If Docker reports that a port is already allocated, choose an unused
-`FRONTEND_PORT` or `RELAY_PORT` and update the related values above.
-
-Do not change the Compose port bindings from `127.0.0.1` to `0.0.0.0` without
-also providing HTTPS, authentication, and a restrictive relay policy. An
-internet-accessible relay can be abused as an SSH proxy.
+Then open <http://localhost:9180>. If Docker reports that the port is already
+allocated, choose an unused `FRONTEND_PORT` and update `ALLOWED_ORIGINS`.
 
 ## Versioning
 
-localssh uses calendar versions in `YYYY.MM.DD` format. The current release is
-`2026.07.25`.
+localssh uses calendar versions in `YYYY.MM.DD` format. Same-day patch releases
+append a revision number as `YYYY.MM.DD.N`. The current release is
+`2026.07.25.1`.
 
 The canonical version is stored in `VERSION` and passed to both container
 images as OCI metadata. The private npm packages use the SemVer-compatible
-equivalent (`2026.7.25`) because SemVer forbids leading zeroes in numeric
-fields.
+equivalent (`2026.7.25+revision.1`) because SemVer forbids leading zeroes in
+numeric fields and represents the same-day revision as build metadata.
 
 Changing `VERSION` on `main` runs the release workflow. The workflow validates
 the calendar date, runs the engine, relay, and frontend checks, publishes
 multi-platform frontend and relay images to GitHub Container Registry, and
-creates a matching `vYYYY.MM.DD` GitHub release. Each calendar version can be
-released only once.
+creates a matching `vYYYY.MM.DD` or `vYYYY.MM.DD.N` GitHub release. Each
+calendar version can be released only once.
 
 ## Security model
 

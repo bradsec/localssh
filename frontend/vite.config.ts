@@ -1,24 +1,16 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-// A production bundle carries whatever relay URL it was built with, and a
-// wrong one only surfaces as a failed connection in someone's browser. These
-// warn at build time about the two mistakes that matter: shipping the
-// localhost development default, and shipping a plaintext ws:// URL that an
-// HTTPS page refuses to open as mixed content.
+// A production bundle uses the same-origin /relay proxy unless an explicit
+// relay URL is supplied. A wrong explicit URL only surfaces as a failed
+// connection in someone's browser, so warn about invalid or unsafe overrides.
 //
 // Warnings, not errors, so `npm run build` keeps working without any
 // environment set up.
 function warnAboutRelayUrl(rawUrl: string | undefined): void {
   const prefix = "[localssh] VITE_RELAY_WS_URL";
 
-  if (!rawUrl) {
-    console.warn(
-      `${prefix} is not set, so this build falls back to the ws://127.0.0.1:8787 ` +
-        "development default. Set it to your relay's wss:// URL before deploying.",
-    );
-    return;
-  }
+  if (!rawUrl) return;
 
   let url: URL;
   try {
