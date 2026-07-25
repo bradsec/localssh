@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["scripts/run-relay.ts", "src/access.ts", "src/local-relay.ts", "src/protocol.ts"]
+}

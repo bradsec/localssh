@@ -1,0 +1,22 @@
+{
+  "name": "relay",
+  "private": true,
+  "version": "2026.7.25",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/scripts/run-relay.js",
+    "test": "vitest run",
+    "relay:local": "tsx scripts/run-local-relay.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.0",
+    "vitest": "^3.0.0"
+  }
+}
