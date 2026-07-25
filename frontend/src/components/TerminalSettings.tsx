@@ -97,7 +97,8 @@ export function TerminalSettings({ value, onChange }: TerminalSettingsProps) {
           <dt>Touch gestures</dt>
           <dd><span>Swipe right</span> Tab</dd>
           <dd><span>Swipe left</span> Esc</dd>
-          <dd><span>Flick up or down</span> Command history</dd>
+          <dd><span>Flick near prompt</span> Command history</dd>
+          <dd><span>Drag with two fingers</span> Scroll output</dd>
         </dl>
       </fieldset>
     </details>

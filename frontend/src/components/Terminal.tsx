@@ -1,8 +1,18 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { classifyGesture, gestureToInput, isTap } from "../terminalGestures.js";
-import { applyFontOptions } from "../terminalFont.js";
+import {
+  classifyGesture,
+  gestureToInput,
+  isTap,
+  twoFingerScrollLines,
+} from "../terminalGestures.js";
+import {
+  applyFontOptions,
+  applyFontOptionsAcrossFrames,
+  isSmallScreenIOS,
+  type IOSDevice,
+} from "../terminalFont.js";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalControls {
@@ -36,6 +46,7 @@ export function Terminal({
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const previousFontSizeRef = useRef(fontSize);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -83,7 +94,11 @@ export function Terminal({
     void document.fonts.ready.then(fitTerminal);
     fitTerminal();
 
-    const detachGestures = attachGestures(containerRef.current, { term, onInput });
+    const detachGestures = attachGestures(containerRef.current, {
+      term,
+      onInput,
+      smallScreenIOS: isSmallScreenIOS(currentIOSDevice()),
+    });
 
     return () => {
       cancelAnimationFrame(animationFrame);
@@ -102,17 +117,33 @@ export function Terminal({
 
   useEffect(() => {
     if (!termRef.current) return;
-    // Re-measures the character cell, which a size change alone does not do.
-    // See terminalFont.ts.
-    applyFontOptions(termRef.current, fontSize, fontFamily);
-    // Then re-fit to the new cell size and repaint every row against it: the
-    // renderer derives its per-row spacing when it draws, and a fit that lands on
-    // the same column count raises no resize of its own to trigger that.
-    requestAnimationFrame(() => {
+    const term = termRef.current;
+    const sizeChanged = previousFontSizeRef.current !== fontSize;
+    previousFontSizeRef.current = fontSize;
+    const device = currentIOSDevice();
+
+    const fitAndRefresh = () => {
       fitRef.current?.fit();
-      const term = termRef.current;
-      if (term) term.refresh(0, term.rows - 1);
-    });
+      const currentTerm = termRef.current;
+      if (currentTerm) currentTerm.refresh(0, currentTerm.rows - 1);
+    };
+
+    let cancelRestore = () => {};
+    let fitFrame = 0;
+    if (sizeChanged && isSmallScreenIOS(device)) {
+      // Mobile Safari can coalesce two family writes in the same turn. Keeping
+      // the temporary family through a rendered frame reproduces the manual font
+      // switch that makes it discard the stale character-cell measurement.
+      cancelRestore = applyFontOptionsAcrossFrames(term, fontSize, fontFamily, fitAndRefresh);
+    } else {
+      applyFontOptions(term, fontSize, fontFamily);
+      fitFrame = requestAnimationFrame(fitAndRefresh);
+    }
+
+    return () => {
+      cancelRestore();
+      cancelAnimationFrame(fitFrame);
+    };
   }, [fontSize, fontFamily]);
 
   useEffect(() => {
@@ -138,6 +169,7 @@ export function Terminal({
 interface GestureTargets {
   term: XTerm;
   onInput: (data: string) => void;
+  smallScreenIOS: boolean;
 }
 
 /**
@@ -154,26 +186,62 @@ interface GestureTargets {
  */
 function attachGestures(element: HTMLElement, targets: GestureTargets): () => void {
   const active = new Map<number, { x: number; y: number }>();
-  let start: { x: number; y: number; at: number } | null = null;
+  let start: {
+    x: number;
+    y: number;
+    at: number;
+    verticalHistoryAllowed: boolean;
+  } | null = null;
   let multiTouch = false;
+  let twoFingerY: number | null = null;
+  let twoFingerRemainder = 0;
+
+  const activeCentroidY = () => {
+    let total = 0;
+    for (const point of active.values()) total += point.y;
+    return total / active.size;
+  };
 
   const onPointerDown = (event: PointerEvent) => {
     if (event.pointerType === "mouse") return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (active.size === 1) {
-      start = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+      const bounds = element.getBoundingClientRect();
+      const startsNearPrompt = event.clientY >= bounds.top + bounds.height * 0.75;
+      start = {
+        x: event.clientX,
+        y: event.clientY,
+        at: event.timeStamp,
+        verticalHistoryAllowed: !targets.smallScreenIOS || startsNearPrompt,
+      };
       multiTouch = false;
     } else {
-      // A second finger is a scroll or a zoom, never a swipe or a tap.
+      // A second finger explicitly drives scrollback, never shell input.
       start = null;
       multiTouch = true;
+      if (active.size === 2) {
+        twoFingerY = activeCentroidY();
+        twoFingerRemainder = 0;
+      }
     }
   };
 
   const onPointerMove = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!multiTouch || active.size !== 2 || twoFingerY === null) return;
+
+    const nextY = activeCentroidY();
+    twoFingerRemainder += nextY - twoFingerY;
+    twoFingerY = nextY;
+    const rowHeight = element.clientHeight / targets.term.rows;
+    const lines = twoFingerScrollLines(twoFingerRemainder, rowHeight);
+    if (lines !== 0) {
+      targets.term.scrollLines(lines);
+      twoFingerRemainder += lines * rowHeight;
+    }
+    event.preventDefault();
   };
 
   const onPointerEnd = (event: PointerEvent) => {
@@ -181,6 +249,10 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     active.delete(event.pointerId);
 
     if (multiTouch) {
+      if (active.size < 2) {
+        twoFingerY = null;
+        twoFingerRemainder = 0;
+      }
       if (active.size === 0) multiTouch = false;
       return;
     }
@@ -191,6 +263,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       dy: event.clientY - start.y,
       dt: event.timeStamp - start.at,
       atBottom: isViewportAtBottom(targets.term),
+      verticalHistoryAllowed: start.verticalHistoryAllowed,
     };
     start = null;
 
@@ -221,4 +294,14 @@ function isViewportAtBottom(term: XTerm): boolean {
 
 function isApplicationCursorMode(term: XTerm): boolean {
   return term.modes.applicationCursorKeysMode;
+}
+
+function currentIOSDevice(): IOSDevice {
+  return {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+    screenWidth: window.screen.width,
+    screenHeight: window.screen.height,
+  };
 }

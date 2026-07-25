@@ -5,8 +5,9 @@
 // vertical gestures cannot simply be claimed. Horizontal movement is free (the
 // terminal never scrolls sideways), so the always-available actions live there.
 // Vertical gestures fire only for a deliberate flick taken while the viewport
-// is already at the bottom of the buffer; a slow drag, or any drag made while
-// reading scrollback, is left alone to scroll.
+// is already at the bottom of the buffer. On a small iOS screen they must also
+// start near the prompt, leaving drags over terminal output unambiguously
+// available for scrollback.
 
 export type TerminalGesture = "tab" | "escape" | "up" | "down";
 
@@ -19,6 +20,8 @@ export interface GestureSample {
   dt: number;
   /** Whether the terminal viewport is scrolled to the live prompt. */
   atBottom: boolean;
+  /** Whether this touch began in the area reserved for vertical history flicks. */
+  verticalHistoryAllowed: boolean;
 }
 
 /** Minimum travel before movement counts as a swipe rather than a tap. */
@@ -32,7 +35,13 @@ const FLICK_MAX_TRAVEL_PX = 160;
 /** Travel a touch may drift and still count as a tap. */
 const TAP_MAX_TRAVEL_PX = 10;
 
-export function classifyGesture({ dx, dy, dt, atBottom }: GestureSample): TerminalGesture | null {
+export function classifyGesture({
+  dx,
+  dy,
+  dt,
+  atBottom,
+  verticalHistoryAllowed,
+}: GestureSample): TerminalGesture | null {
   const absX = Math.abs(dx);
   const absY = Math.abs(dy);
 
@@ -42,7 +51,7 @@ export function classifyGesture({ dx, dy, dt, atBottom }: GestureSample): Termin
 
   if (absY >= MIN_TRAVEL_PX && absY >= absX * AXIS_RATIO) {
     // Reading scrollback: leave every vertical drag to the viewport.
-    if (!atBottom) return null;
+    if (!atBottom || !verticalHistoryAllowed) return null;
     if (dt > FLICK_MAX_MS || absY > FLICK_MAX_TRAVEL_PX) return null;
     return dy < 0 ? "up" : "down";
   }
@@ -78,4 +87,14 @@ export function gestureToInput(
  */
 export function isTap({ dx, dy }: Pick<GestureSample, "dx" | "dy">): boolean {
   return Math.hypot(dx, dy) <= TAP_MAX_TRAVEL_PX;
+}
+
+/**
+ * Converts two-finger content movement into terminal scrollback lines. Dragging
+ * the content down reveals earlier output, so it scrolls toward negative lines.
+ */
+export function twoFingerScrollLines(deltaY: number, rowHeight: number): number {
+  if (!Number.isFinite(rowHeight) || rowHeight <= 0) return 0;
+  const lines = Math.trunc(deltaY / rowHeight);
+  return lines === 0 ? 0 : -lines;
 }

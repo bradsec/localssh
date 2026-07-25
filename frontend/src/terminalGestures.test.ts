@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyGesture, gestureToInput, isTap } from "./terminalGestures.js";
+import {
+  classifyGesture,
+  gestureToInput,
+  isTap,
+  twoFingerScrollLines,
+} from "./terminalGestures.js";
 
-const flick = { dt: 120, atBottom: true };
+const flick = { dt: 120, atBottom: true, verticalHistoryAllowed: true };
 
 describe("classifyGesture", () => {
   it("reads a swipe right as tab", () => {
@@ -28,20 +33,72 @@ describe("classifyGesture", () => {
 
   // The cases below are what keep scrollback usable on a touch screen.
   it("leaves vertical drags alone while the user is reading scrollback", () => {
-    expect(classifyGesture({ dx: 3, dy: -70, dt: 120, atBottom: false })).toBeNull();
-    expect(classifyGesture({ dx: 3, dy: 70, dt: 120, atBottom: false })).toBeNull();
+    expect(
+      classifyGesture({
+        dx: 3,
+        dy: -70,
+        dt: 120,
+        atBottom: false,
+        verticalHistoryAllowed: true,
+      }),
+    ).toBeNull();
+    expect(
+      classifyGesture({
+        dx: 3,
+        dy: 70,
+        dt: 120,
+        atBottom: false,
+        verticalHistoryAllowed: true,
+      }),
+    ).toBeNull();
   });
 
   it("leaves a slow vertical drag alone even at the bottom", () => {
-    expect(classifyGesture({ dx: 3, dy: -70, dt: 900, atBottom: true })).toBeNull();
+    expect(
+      classifyGesture({
+        dx: 3,
+        dy: -70,
+        dt: 900,
+        atBottom: true,
+        verticalHistoryAllowed: true,
+      }),
+    ).toBeNull();
   });
 
   it("leaves a long vertical drag alone even when it is fast", () => {
-    expect(classifyGesture({ dx: 3, dy: -400, dt: 120, atBottom: true })).toBeNull();
+    expect(
+      classifyGesture({
+        dx: 3,
+        dy: -400,
+        dt: 120,
+        atBottom: true,
+        verticalHistoryAllowed: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("leaves a vertical flick to scrolling outside the history gesture area", () => {
+    expect(
+      classifyGesture({
+        dx: 3,
+        dy: -70,
+        dt: 120,
+        atBottom: true,
+        verticalHistoryAllowed: false,
+      }),
+    ).toBeNull();
   });
 
   it("still recognises horizontal swipes while reading scrollback", () => {
-    expect(classifyGesture({ dx: 90, dy: 4, dt: 900, atBottom: false })).toBe("tab");
+    expect(
+      classifyGesture({
+        dx: 90,
+        dy: 4,
+        dt: 900,
+        atBottom: false,
+        verticalHistoryAllowed: false,
+      }),
+    ).toBe("tab");
   });
 });
 
@@ -73,5 +130,23 @@ describe("isTap", () => {
   it("rejects travel that belongs to a swipe or a scroll drag", () => {
     expect(isTap({ dx: 0, dy: 40 })).toBe(false);
     expect(isTap({ dx: 60, dy: 0 })).toBe(false);
+  });
+});
+
+describe("twoFingerScrollLines", () => {
+  it("scrolls toward earlier output when two fingers drag down", () => {
+    expect(twoFingerScrollLines(42, 14)).toBe(-3);
+  });
+
+  it("scrolls toward the prompt when two fingers drag up", () => {
+    expect(twoFingerScrollLines(-42, 14)).toBe(3);
+  });
+
+  it("waits until the drag crosses a complete terminal row", () => {
+    expect(twoFingerScrollLines(8, 14)).toBe(0);
+  });
+
+  it("ignores an unavailable row height", () => {
+    expect(twoFingerScrollLines(42, 0)).toBe(0);
   });
 });
