@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { About } from "./components/About.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
@@ -9,6 +9,7 @@ import { loadKnownHosts, trustHostKey } from "./storage/knownHostsStore.js";
 import { loadTerminalSettings, saveTerminalSettings } from "./storage/settingsStore.js";
 import { resolveRelayWsUrl } from "./relayUrl.js";
 import { DEFAULT_THEME_NAME, TERMINAL_THEMES } from "./terminalThemes.js";
+import { trackViewportHeight } from "./viewportHeight.js";
 
 const RELAY_WS_URL = resolveRelayWsUrl(import.meta.env.VITE_RELAY_WS_URL, window.location);
 
@@ -31,19 +32,32 @@ export function App() {
   const [activeTarget, setActiveTarget] = useState<string | null>(null);
   const [terminalSize, setTerminalSize] = useState({ cols: 80, rows: 24 });
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const handleRef = useRef<SshHandle | null>(null);
   const terminalControlsRef = useRef<TerminalControls | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
 
-  // Pinch-to-zoom updates the font size from a listener attached once, so it
-  // reads the latest settings through a ref rather than a stale closure.
-  const terminalSettingsRef = useRef(terminalSettings);
+  // Sizes the shell to the space the on-screen keyboard leaves, so the prompt
+  // stays visible above it. The terminal refits from its own resize observer.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    return trackViewportHeight(viewport, document.documentElement);
+  }, []);
 
   const updateTerminalSettings = useCallback((next: typeof terminalSettings) => {
-    terminalSettingsRef.current = next;
     setTerminalSettings(next);
     saveTerminalSettings(next);
   }, []);
+
+  // Safari raises the on-screen keyboard only for a focus() call made inside a
+  // user gesture, so this runs straight off the click with nothing awaited.
+  const toggleKeyboard = useCallback(() => {
+    const controls = terminalControlsRef.current;
+    if (!controls) return;
+    if (keyboardOpen) controls.blur();
+    else controls.focus();
+  }, [keyboardOpen]);
 
   const attemptConnect = useCallback(async (values: ConnectFormValues) => {
     setStatus({ kind: "connecting" });
@@ -63,8 +77,10 @@ export function App() {
           handleRef.current = null;
           setActiveTarget(null);
           // Wipe the screen so a closed session's output is not left on
-          // display behind the connect form.
+          // display behind the connect form, and drop focus so a phone's
+          // keyboard does not sit over the connect form.
           terminalControlsRef.current?.reset();
+          terminalControlsRef.current?.blur();
           setStatus({ kind: "idle" });
         },
       });
@@ -109,6 +125,7 @@ export function App() {
     handleRef.current = null;
     setActiveTarget(null);
     terminalControlsRef.current?.reset();
+    terminalControlsRef.current?.blur();
     setStatus({ kind: "idle" });
   }, []);
 
@@ -131,9 +148,20 @@ export function App() {
         </div>
         <div className="toolbar-actions">
           {status.kind === "connected" && (
-            <button className="toolbar-button" type="button" onClick={disconnect}>
-              Disconnect
-            </button>
+            <>
+              {/* Hidden on a desktop by CSS: a physical keyboard needs no button. */}
+              <button
+                className="toolbar-button keyboard-toggle"
+                type="button"
+                onClick={toggleKeyboard}
+                aria-pressed={keyboardOpen}
+              >
+                {keyboardOpen ? "Hide keyboard" : "Keyboard"}
+              </button>
+              <button className="toolbar-button" type="button" onClick={disconnect}>
+                Disconnect
+              </button>
+            </>
           )}
           <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
           <About />
@@ -172,9 +200,7 @@ export function App() {
                 );
                 handleRef.current?.resize(cols, rows);
               }}
-              onFontSizeChange={(nextFontSize) =>
-                updateTerminalSettings({ ...terminalSettingsRef.current, fontSize: nextFontSize })
-              }
+              onFocusChange={setKeyboardOpen}
               fontSize={terminalSettings.fontSize}
               fontFamily={terminalSettings.fontFamily}
               theme={terminalTheme}

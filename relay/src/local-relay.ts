@@ -1,5 +1,6 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { createConnection, type Socket } from "node:net";
+import type { IncomingMessage } from "node:http";
 import {
   AccessDeniedError,
   assertOriginAllowed,
@@ -28,12 +29,38 @@ export interface LocalRelayOptions {
   host?: string;
   /** Access policy. Omit only for the loopback development relay. */
   accessConfig?: RelayAccessConfig;
+  /**
+   * Where refused connections are reported. A browser cannot show its user why
+   * a WebSocket handshake failed: the status code and body of a 403 are not
+   * exposed to page scripts, so a misconfigured allowlist looks like a generic
+   * connection failure. The server log is the only place the reason can be
+   * read, so every refusal is written there with the value that was rejected.
+   */
+  log?: (message: string) => void;
   /** How long to wait for the connect frame before closing. */
   connectFrameTimeoutMs?: number;
   /** Buffered bytes for the client at which the target is paused. */
   pauseWatermarkBytes?: number;
   /** Buffered bytes at which a paused target is resumed. */
   resumeWatermarkBytes?: number;
+}
+
+/** A browser always sends Origin; a non-browser client need not. */
+function describeOrigin(origin: string | undefined | null): string {
+  return origin && origin !== "" ? origin : "(no origin header)";
+}
+
+/**
+ * Address to name in a log line. The relay usually sits behind the bundled nginx,
+ * which makes every socket appear to come from the proxy, so the forwarded
+ * address is preferred when present. A client can put anything in that header, so
+ * this value is only ever written to the log; no access decision reads it.
+ */
+function describeClient(request: IncomingMessage): string {
+  const forwarded = request.headers["x-forwarded-for"];
+  const claimed = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
+  if (claimed) return claimed;
+  return request.socket.remoteAddress ?? "unknown address";
 }
 
 export function startLocalRelay({
@@ -43,6 +70,7 @@ export function startLocalRelay({
   connectFrameTimeoutMs = CONNECT_FRAME_TIMEOUT_MS,
   pauseWatermarkBytes = PAUSE_WATERMARK_BYTES,
   resumeWatermarkBytes = RESUME_WATERMARK_BYTES,
+  log = (message) => console.warn(message),
 }: LocalRelayOptions): WebSocketServer {
   const wss = new WebSocketServer({
     port,
@@ -55,14 +83,21 @@ export function startLocalRelay({
           } catch (error) {
             const message =
               error instanceof AccessDeniedError ? error.message : "relay access denied";
+            const from = describeClient(info.req);
+            log(
+              `refused handshake from ${from}: ${message}. ` +
+                `Add the exact page origin ${describeOrigin(info.origin)} to ALLOWED_ORIGINS, ` +
+                "or set ALLOWED_ORIGINS=* for a firewalled local network.",
+            );
             done(false, 403, message);
           }
         }
       : undefined,
   });
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, request: IncomingMessage) => {
     let target: Socket | null = null;
+    const origin = describeOrigin(request.headers.origin);
 
     // `ws` emits 'error' on the socket for ordinary client faults, including a
     // malformed frame from any client that can reach the port. Node raises
@@ -92,6 +127,10 @@ export function startLocalRelay({
         if (accessConfig) assertTargetAllowed(frame.host, frame.port, accessConfig);
       } catch (error) {
         const message = error instanceof AccessDeniedError ? error.message : "target not allowed";
+        log(
+          `refused target ${frame.host}:${frame.port} from ${origin}: ${message}. ` +
+            "Add the host to ALLOWED_HOSTS and the port to ALLOWED_PORTS to permit it.",
+        );
         ws.close(1008, message);
         return;
       }

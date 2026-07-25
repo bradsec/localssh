@@ -40,6 +40,32 @@ docker compose up -d
 
 Open <http://localhost:9080>.
 
+### Update to a new release
+
+Pull the new images and recreate the containers. Compose replaces only what
+changed, and a session is only interrupted for as long as the containers take to
+restart:
+
+```bash
+cd localssh
+git pull
+docker compose pull
+docker compose up -d
+```
+
+`git pull` matters when `compose.yaml`, the relay proxy configuration, or the
+`.env.example` defaults changed in the release; your own `.env` is never touched.
+
+This tracks the `latest` tag. To move deliberately between releases, set the
+version in `.env` and recreate:
+
+```dotenv
+LOCALSSH_VERSION=2026.07.25.2
+```
+
+Old images stay on disk after an update. Remove the ones no longer referenced
+with `docker image prune`.
+
 ### Stop or remove the Docker installation
 
 Stop and remove the application containers and network:
@@ -62,6 +88,11 @@ separate published port.
 
 ### Access from a local network
 
+This is the intended deployment: install localssh on one server, and everyone
+else on the network uses it as their SSH client from a browser. Each visitor's
+own browser runs the SSH engine and stores its own known hosts, so nothing about
+one person's session is shared with another.
+
 Give the server a stable LAN address or hostname, then copy and edit the
 configuration:
 
@@ -74,7 +105,7 @@ For a server at `192.168.1.20`, use:
 ```dotenv
 BIND_ADDRESS=0.0.0.0
 FRONTEND_PORT=9080
-ALLOWED_ORIGINS=http://192.168.1.20:9080
+ALLOWED_ORIGINS=*
 ALLOWED_HOSTS=server.example.com,*.internal.example
 ALLOWED_PORTS=22
 ```
@@ -87,11 +118,42 @@ docker compose up -d
 ```
 
 Allow inbound TCP port `9080` from the trusted LAN in the server firewall.
+
+`ALLOWED_ORIGINS=*` is the recommendation for a firewalled local network because
+visitors arrive by whatever address they typed: the LAN IP, a short hostname, an
+mDNS `.local` name. An exact-match list has to name every one of them, and an
+address that changes with a DHCP lease breaks the deployment. What the wildcard
+costs: any page open in a visitor's browser can also reach the relay and dial the
+hosts you allowlisted. `ALLOWED_HOSTS` is therefore the boundary that matters,
+so keep it to the hosts you intend, not `*`.
+
+To keep an exact-match list instead, name every URL people use, including the
+ones used on the server itself:
+
+```dotenv
+ALLOWED_ORIGINS=http://192.168.1.20:9080,http://server.local:9080,http://localhost:9080
+```
+
 Do not expose this HTTP service directly to the internet. Any browser that can
 reach it can use the unauthenticated relay to connect to `ALLOWED_HOSTS`, and
 plain HTTP does not protect the page from modification in transit. Use a
 restrictive target allowlist and put an internet-facing deployment behind an
 authenticated HTTPS reverse proxy.
+
+### When a browser cannot connect
+
+A browser is not told why a WebSocket handshake failed: the relay's 403 and its
+reason are hidden from the page, which can only report that the relay could not
+be reached. The relay logs every refusal with the value it rejected, so check
+there first:
+
+```bash
+docker compose logs relay
+```
+
+A refused origin means the address that visitor used is not in
+`ALLOWED_ORIGINS`; a refused target means the host or port they asked for is not
+in `ALLOWED_HOSTS` or `ALLOWED_PORTS`.
 
 ### Configuration
 
@@ -105,17 +167,17 @@ cp .env.example .env
 | -------- | ------- | ------- |
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface for the web port. Use `0.0.0.0` for LAN access. |
 | `FRONTEND_PORT` | `9080` | Host port for the web interface. |
-| `ALLOWED_ORIGINS` | local frontend URLs | Exact browser origins allowed to connect. |
+| `ALLOWED_ORIGINS` | local frontend URLs | Browser origins allowed to use the relay, matched exactly. `*` allows any origin, which is the practical setting for a firewalled LAN. |
 | `ALLOWED_HOSTS` | `*` | Comma-separated target hosts. `*.example.com` matches subdomains. |
 | `ALLOWED_PORTS` | `22` | Comma-separated target TCP ports. |
 
 `LOCALSSH_VERSION` selects the container image tag. Leave it unset to track the
-latest release, or set it to a release such as `2026.07.25.1` for repeatable
+latest release, or set it to a release such as `2026.07.25.2` for repeatable
 installs.
 
-`ALLOWED_ORIGINS` must contain every exact URL used to open the interface,
-including its scheme, hostname or address, and non-default port. For a private
-set of SSH targets, replace `*` with explicit names:
+Unless it is `*`, `ALLOWED_ORIGINS` must contain every exact URL used to open the
+interface, including its scheme, hostname or address, and non-default port. For a
+private set of SSH targets, replace `*` with explicit names:
 
 ```dotenv
 ALLOWED_HOSTS=server.example.com,*.internal.example
@@ -144,12 +206,17 @@ allocated, choose an unused `FRONTEND_PORT` and update `ALLOWED_ORIGINS`.
 
 localssh uses calendar versions in `YYYY.MM.DD` format. Same-day patch releases
 append a revision number as `YYYY.MM.DD.N`. The current release is
-`2026.07.25.1`.
+`2026.07.25.2`.
 
 The canonical version is stored in `VERSION` and passed to both container
 images as OCI metadata. The private npm packages use the SemVer-compatible
-equivalent (`2026.7.25+revision.1`) because SemVer forbids leading zeroes in
+equivalent (`2026.7.25+revision.2`) because SemVer forbids leading zeroes in
 numeric fields and represents the same-day revision as build metadata.
+
+The connect panel shows the running version, so anyone can read it without
+inspecting the containers. The frontend build takes that string from `VERSION`,
+or from the `VERSION` build argument for a container build, which is the same
+value the release workflow tags the images with. No source file repeats it.
 
 Changing `VERSION` on `main` runs the release workflow. The workflow validates
 the calendar date, runs the engine, relay, and frontend checks, publishes
@@ -178,9 +245,16 @@ What this design does and does not protect you from:
 ## Terminal
 
 Font, font size, and colour scheme are configurable from the Appearance menu
-and persist in `localStorage`. The terminal reports its fitted size to the
-remote PTY, so resizing the window, rotating a phone, or opening an on-screen
-keyboard keeps width-aware commands formatting correctly.
+and persist in `localStorage`. Font size is a picker, which a phone renders as a
+scroll wheel. The terminal reports its fitted size to the remote PTY, so resizing
+the window, rotating a phone, or opening an on-screen keyboard keeps width-aware
+commands formatting correctly.
+
+On a touch device the toolbar shows a **Keyboard** button while a session is
+connected, which raises and dismisses the on-screen keyboard. Tapping the
+terminal also raises it. The button exists because a browser opens the keyboard
+only for a deliberate action on a real control, and it is the reliable way back
+to typing after the keyboard has been dismissed.
 
 Touch gestures, for devices with no physical Tab or arrow keys:
 
@@ -189,10 +263,10 @@ Touch gestures, for devices with no physical Tab or arrow keys:
 | Swipe right        | Tab              |
 | Swipe left         | Esc              |
 | Flick up or down   | Command history  |
-| Pinch              | Font size        |
 
 Vertical flicks defer to scrollback: while you are reading history, vertical
-drags scroll normally.
+drags scroll normally. Pinch does nothing over the terminal: set the font size
+from the Appearance menu instead.
 
 ## Development
 

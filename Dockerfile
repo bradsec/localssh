@@ -1,4 +1,4 @@
-ARG VERSION=2026.07.25.1
+ARG VERSION=2026.07.25.2
 
 FROM golang:1.26.4-alpine AS engine
 WORKDIR /src/engine
@@ -11,6 +11,10 @@ RUN GOOS=js GOARCH=wasm go build -o dist/engine.wasm . \
 FROM node:22-alpine AS frontend
 ARG VITE_RELAY_WS_URL
 ENV VITE_RELAY_WS_URL=${VITE_RELAY_WS_URL}
+# This stage only receives frontend/, so the VERSION file the build would
+# otherwise read is not here; pass the release version in for the UI to show.
+ARG VERSION
+ENV VITE_APP_VERSION=${VERSION}
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci

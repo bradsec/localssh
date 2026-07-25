@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyGesture, gestureToInput, pinchFontSize } from "./terminalGestures.js";
+import { classifyGesture, gestureToInput, isTap } from "./terminalGestures.js";
 
 const flick = { dt: 120, atBottom: true };
 
@@ -64,14 +64,14 @@ describe("gestureToInput", () => {
   });
 });
 
-describe("pinchFontSize", () => {
-  it("scales the base size", () => {
-    expect(pinchFontSize(14, 1.5)).toBe(21);
-    expect(pinchFontSize(20, 0.75)).toBe(15);
+describe("isTap", () => {
+  it("accepts a still touch and the drift of a real thumb", () => {
+    expect(isTap({ dx: 0, dy: 0 })).toBe(true);
+    expect(isTap({ dx: 4, dy: -5 })).toBe(true);
   });
 
-  it("clamps to the range the settings panel allows", () => {
-    expect(pinchFontSize(14, 10)).toBe(32);
-    expect(pinchFontSize(14, 0.01)).toBe(8);
+  it("rejects travel that belongs to a swipe or a scroll drag", () => {
+    expect(isTap({ dx: 0, dy: 40 })).toBe(false);
+    expect(isTap({ dx: 60, dy: 0 })).toBe(false);
   });
 });

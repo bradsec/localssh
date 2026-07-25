@@ -53,8 +53,12 @@ body,
   margin: 0;
 }
 
+/* --app-height is the visual viewport height, published by App.tsx while a
+   visual viewport exists; the dvh fallback covers the first paint and any browser
+   without one. Body and shell share it so the page has no spare height to
+   scroll: given any, iOS drifts the layout up behind the keyboard. */
 body {
-  min-height: 100dvh;
+  min-height: var(--app-height, 100dvh);
   overflow: hidden;
 }
 
@@ -112,8 +116,8 @@ h2 {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100dvh;
-  min-height: 100dvh;
+  height: var(--app-height, 100dvh);
+  min-height: var(--app-height, 100dvh);
   overflow: hidden;
   color: var(--text);
   background: var(--canvas);
@@ -323,15 +327,37 @@ h2 {
   overflow: hidden;
 }
 
-/* pan-y leaves vertical scrolling to xterm's viewport while reserving pinch
-   and horizontal swipes for the gesture handler in Terminal.tsx. Without it
-   iOS Safari zooms the whole page on a pinch instead of resizing the text. */
+/* pan-y leaves vertical scrolling to xterm's viewport and reserves horizontal
+   swipes for the gesture handler in Terminal.tsx. It also keeps a pinch from
+   zooming the page over the terminal, where a zoomed viewport hides the prompt
+   and reflows nothing; font size belongs to the Appearance panel. */
 .terminal {
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   touch-action: pan-y;
+}
+
+/* The hidden textarea is where xterm receives keystrokes, so it is the element
+   iOS focuses. Safari zooms the whole page in when a focused field's text is
+   under 16px, which leaves the terminal half off-screen; the size is invisible
+   here because the textarea is transparent and one cell wide. */
+.terminal .xterm-helper-textarea {
+  font-size: 16px;
+}
+
+/* Only a touch device needs a button to summon its keyboard. Coarse pointer is
+   the test rather than width alone, so a phone held in landscape (wider than the
+   phone breakpoint) keeps the button, while a desktop never shows it. */
+.keyboard-toggle {
+  display: none;
+}
+
+@media (pointer: coarse), (max-width: 720px) {
+  .keyboard-toggle {
+    display: grid;
+  }
 }
 
 .terminal .xterm-viewport {
@@ -398,6 +424,17 @@ h2 {
 .privacy-note strong {
   color: var(--text);
   font-size: 0.78rem;
+}
+
+/* Sits under the privacy note, which already holds the bottom of the column.
+   Written as a p selector to outrank the intro paragraph rule above. */
+.connect-panel__intro > p.connect-version {
+  margin-bottom: 0;
+  padding-top: 18px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: -0.01em;
 }
 
 .connect-form {
@@ -931,8 +968,15 @@ h2 {
     margin-bottom: 0;
   }
 
+  /* With the privacy note gone, the version line takes over holding the bottom
+     of the column. */
   .privacy-note {
     display: none;
+  }
+
+  .connect-panel__intro > p.connect-version {
+    margin-top: auto;
+    padding-top: 14px;
   }
 }
 

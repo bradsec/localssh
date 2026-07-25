@@ -14,7 +14,16 @@ import (
 	"time"
 )
 
-var errWebSocketConnect = errors.New("websocket connect failed")
+// A failed WebSocket handshake reaches page scripts as a bare error event: the
+// browser withholds the status code and body, so a relay that answered 403
+// because the page origin is not in its allowlist is indistinguishable here
+// from a relay that is not running. The message names both causes, because the
+// allowlist is the one an operator can fix and the relay log records which it
+// was.
+var errWebSocketConnect = errors.New(
+	"could not reach the relay: it may be down, or it refused this page's origin " +
+		"(check ALLOWED_ORIGINS in the relay configuration, and the relay log for the reason)",
+)
 
 // Conn implements net.Conn over a browser/Node WebSocket, so sshclient.Connect
 // can dial through it exactly as it would a real TCP connection. On open, it

@@ -1,5 +1,21 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+
+// The version shown in the UI comes from the repository's VERSION file, the same
+// value the release workflow tags the images with, so a release updates the page
+// without anyone editing a string. Container builds copy only frontend/, so the
+// Dockerfile passes the release version in as VITE_APP_VERSION instead.
+function resolveAppVersion(): string {
+  const fromEnvironment = process.env.VITE_APP_VERSION?.trim();
+  if (fromEnvironment) return fromEnvironment;
+
+  try {
+    return readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim();
+  } catch {
+    return "development";
+  }
+}
 
 // A production bundle uses the same-origin /relay proxy unless an explicit
 // relay URL is supplied. A wrong explicit URL only surfaces as a failed
@@ -39,5 +55,10 @@ export default defineConfig(({ mode }) => {
     // Read through loadEnv so .env files are honoured, not just the shell.
     warnAboutRelayUrl(loadEnv(mode, process.cwd(), "").VITE_RELAY_WS_URL);
   }
-  return { plugins: [react()] };
+  return {
+    plugins: [react()],
+    define: {
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(resolveAppVersion()),
+    },
+  };
 });

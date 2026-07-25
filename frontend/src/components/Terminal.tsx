@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { classifyGesture, gestureToInput, pinchFontSize } from "../terminalGestures.js";
+import { classifyGesture, gestureToInput, isTap } from "../terminalGestures.js";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalControls {
@@ -9,13 +9,17 @@ export interface TerminalControls {
   /** Wipes the screen and scrollback so no session leaks into the next one. */
   reset: () => void;
   focus: () => void;
+  /** Drops focus, which is what dismisses a phone's on-screen keyboard. */
+  blur: () => void;
 }
 
 export interface TerminalProps {
   onReady: (controls: TerminalControls) => void;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
-  onFontSizeChange: (fontSize: number) => void;
+  /** Reports whether the terminal holds focus, so the keyboard button can
+   * label itself for what the next tap will do. */
+  onFocusChange?: (focused: boolean) => void;
   fontSize: number;
   fontFamily: string;
   theme: ITheme;
@@ -26,7 +30,7 @@ export function Terminal({
   onReady,
   onInput,
   onResize,
-  onFontSizeChange,
+  onFocusChange,
   fontSize,
   fontFamily,
   theme,
@@ -36,13 +40,11 @@ export function Terminal({
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   // Read inside listeners that are attached once, so they never go stale.
-  const fontSizeRef = useRef(fontSize);
-  const onFontSizeChangeRef = useRef(onFontSizeChange);
+  const onFocusChangeRef = useRef(onFocusChange);
 
   useEffect(() => {
-    fontSizeRef.current = fontSize;
-    onFontSizeChangeRef.current = onFontSizeChange;
-  }, [fontSize, onFontSizeChange]);
+    onFocusChangeRef.current = onFocusChange;
+  }, [onFocusChange]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -71,7 +73,13 @@ export function Terminal({
       write: (data) => term.write(data),
       reset: () => term.reset(),
       focus: () => term.focus(),
+      blur: () => term.blur(),
     });
+
+    const reportFocus = () => onFocusChangeRef.current?.(true);
+    const reportBlur = () => onFocusChangeRef.current?.(false);
+    term.textarea?.addEventListener("focus", reportFocus);
+    term.textarea?.addEventListener("blur", reportBlur);
 
     let animationFrame = 0;
     const fitTerminal = () => {
@@ -89,18 +97,15 @@ export function Terminal({
     void document.fonts.ready.then(fitTerminal);
     fitTerminal();
 
-    const detachGestures = attachGestures(containerRef.current, {
-      term,
-      onInput,
-      getFontSize: () => fontSizeRef.current,
-      setFontSize: (next) => onFontSizeChangeRef.current(next),
-    });
+    const detachGestures = attachGestures(containerRef.current, { term, onInput });
 
     return () => {
       cancelAnimationFrame(animationFrame);
       observer.disconnect();
       window.visualViewport?.removeEventListener("resize", fitTerminal);
       detachGestures();
+      term.textarea?.removeEventListener("focus", reportFocus);
+      term.textarea?.removeEventListener("blur", reportBlur);
       dataSubscription.dispose();
       resizeSubscription.dispose();
       term.dispose();
@@ -141,28 +146,24 @@ export function Terminal({
 interface GestureTargets {
   term: XTerm;
   onInput: (data: string) => void;
-  getFontSize: () => number;
-  setFontSize: (next: number) => void;
 }
 
 /**
  * Recognises the touch gestures a phone or tablet needs to drive a shell:
- * swipe right for Tab, left for Esc, flick up or down for shell history, and
- * pinch to size the text. Pointer events cover touch and pen without claiming
- * the mouse, and nothing here calls preventDefault on a scroll, so xterm keeps
- * its own touch scrolling and text selection.
+ * swipe right for Tab, left for Esc, and flick up or down for shell history.
+ * Pointer events cover touch and pen without claiming the mouse, and nothing
+ * here calls preventDefault on a scroll, so xterm keeps its own touch scrolling
+ * and text selection.
+ *
+ * A tap focuses the terminal from inside the pointerup handler. Safari opens the
+ * on-screen keyboard only for a focus() made during a user gesture, and xterm's
+ * own focus happens in a synthesised mousedown, which is a weaker claim to that
+ * gesture; focusing here makes a tap raise the keyboard on iOS.
  */
 function attachGestures(element: HTMLElement, targets: GestureTargets): () => void {
   const active = new Map<number, { x: number; y: number }>();
   let start: { x: number; y: number; at: number } | null = null;
-  let pinchStartDistance = 0;
-  let pinchBaseFontSize = 0;
-
-  const distance = () => {
-    const [a, b] = [...active.values()];
-    if (!a || !b) return 0;
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
+  let multiTouch = false;
 
   const onPointerDown = (event: PointerEvent) => {
     if (event.pointerType === "mouse") return;
@@ -170,45 +171,43 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
 
     if (active.size === 1) {
       start = { x: event.clientX, y: event.clientY, at: event.timeStamp };
-    } else if (active.size === 2) {
-      start = null; // a second finger means this is a pinch, not a swipe
-      pinchStartDistance = distance();
-      pinchBaseFontSize = targets.getFontSize();
+      multiTouch = false;
+    } else {
+      // A second finger is a scroll or a zoom, never a swipe or a tap.
+      start = null;
+      multiTouch = true;
     }
   };
 
   const onPointerMove = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
-
-    if (active.size !== 2 || pinchStartDistance <= 0) return;
-    const current = distance();
-    if (current <= 0) return;
-
-    const next = pinchFontSize(pinchBaseFontSize, current / pinchStartDistance);
-    if (next !== targets.getFontSize()) targets.setFontSize(next);
   };
 
   const onPointerEnd = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
-    const wasPinching = active.size === 2;
     active.delete(event.pointerId);
 
-    if (wasPinching) {
-      pinchStartDistance = 0;
-      start = null;
+    if (multiTouch) {
+      if (active.size === 0) multiTouch = false;
       return;
     }
     if (!start || active.size > 0) return;
 
-    const gesture = classifyGesture({
+    const sample = {
       dx: event.clientX - start.x,
       dy: event.clientY - start.y,
       dt: event.timeStamp - start.at,
       atBottom: isViewportAtBottom(targets.term),
-    });
+    };
     start = null;
-    if (gesture) targets.onInput(gestureToInput(gesture, isApplicationCursorMode(targets.term)));
+
+    const gesture = classifyGesture(sample);
+    if (gesture) {
+      targets.onInput(gestureToInput(gesture, isApplicationCursorMode(targets.term)));
+      return;
+    }
+    if (isTap(sample)) targets.term.focus();
   };
 
   element.addEventListener("pointerdown", onPointerDown);

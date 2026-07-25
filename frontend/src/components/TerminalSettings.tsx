@@ -8,6 +8,11 @@ export interface TerminalSettingsProps {
   onChange: (next: TerminalSettings) => void;
 }
 
+// A select, not a number input: iOS Safari renders a select as a scroll wheel,
+// which is reachable with one thumb, while the stepper arrows of a number input
+// are far too small to hit on a phone and its text field summons the keyboard.
+const FONT_SIZES = Array.from({ length: 25 }, (_, index) => index + 8);
+
 export function TerminalSettings({ value, onChange }: TerminalSettingsProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const [open, setOpen] = useState(false);
@@ -48,18 +53,19 @@ export function TerminalSettings({ value, onChange }: TerminalSettingsProps) {
         <legend className="visually-hidden">Terminal appearance</legend>
         <label className="field">
           <span>Font size</span>
-          <input
-            type="number"
-            min={8}
-            max={32}
-            value={value.fontSize}
+          <select
+            value={String(value.fontSize)}
             onChange={(event) => {
-              const fontSize = event.currentTarget.valueAsNumber;
-              if (Number.isFinite(fontSize)) {
-                onChange({ ...value, fontSize: Math.min(32, Math.max(8, fontSize)) });
-              }
+              const fontSize = Number(event.target.value);
+              if (Number.isFinite(fontSize)) onChange({ ...value, fontSize });
             }}
-          />
+          >
+            {FONT_SIZES.map((size) => (
+              <option key={size} value={String(size)}>
+                {size} px
+              </option>
+            ))}
+          </select>
         </label>
         <label className="field">
           <span>Font family</span>
@@ -92,7 +98,6 @@ export function TerminalSettings({ value, onChange }: TerminalSettingsProps) {
           <dd><span>Swipe right</span> Tab</dd>
           <dd><span>Swipe left</span> Esc</dd>
           <dd><span>Flick up or down</span> Command history</dd>
-          <dd><span>Pinch</span> Font size</dd>
         </dl>
       </fieldset>
     </details>

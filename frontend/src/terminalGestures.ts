@@ -29,6 +29,8 @@ const AXIS_RATIO = 1.6;
 const FLICK_MAX_MS = 300;
 /** Beyond this travel a vertical move reads as a scroll drag, not a flick. */
 const FLICK_MAX_TRAVEL_PX = 160;
+/** Travel a touch may drift and still count as a tap. */
+const TAP_MAX_TRAVEL_PX = 10;
 
 export function classifyGesture({ dx, dy, dt, atBottom }: GestureSample): TerminalGesture | null {
   const absX = Math.abs(dx);
@@ -69,7 +71,11 @@ export function gestureToInput(
   }
 }
 
-/** Font size for a pinch, clamped to the range the settings panel allows. */
-export function pinchFontSize(baseFontSize: number, scale: number): number {
-  return Math.min(32, Math.max(8, Math.round(baseFontSize * scale)));
+/**
+ * Whether a touch stayed still enough to be a tap rather than a swipe or a
+ * scroll drag. A tap is what focuses the terminal, so the threshold is small:
+ * moving the page and gaining focus at the same time is surprising.
+ */
+export function isTap({ dx, dy }: Pick<GestureSample, "dx" | "dy">): boolean {
+  return Math.hypot(dx, dy) <= TAP_MAX_TRAVEL_PX;
 }

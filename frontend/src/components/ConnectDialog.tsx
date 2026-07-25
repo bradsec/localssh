@@ -5,6 +5,7 @@ import {
   saveLastHost,
   saveRememberHost,
 } from "../storage/lastHostStore.js";
+import { APP_VERSION } from "../appVersion.js";
 
 export interface ConnectFormValues {
   host: string;
@@ -48,6 +49,7 @@ export function ConnectDialog({ onConnect, disabled }: ConnectDialogProps) {
           <strong>Private by design</strong>
           <span>Your password stays in memory for this connection only.</span>
         </div>
+        <p className="connect-version">localssh {APP_VERSION}</p>
       </div>
 
       <form className="connect-form" onSubmit={handleSubmit}>

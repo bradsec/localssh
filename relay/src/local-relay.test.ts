@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createServer, connect as netConnect, type AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import { startLocalRelay } from "./local-relay.js";
@@ -51,6 +51,95 @@ describe("local relay", () => {
     client.send(encodeConnectFrame({ host: "evil.example", port: 22 }));
 
     expect(await closed).toBe(1008);
+    wss.close();
+  });
+
+  it("logs a rejected origin so the operator can see the misconfiguration", async () => {
+    const log = vi.fn();
+    const wss = startLocalRelay({
+      port: 0,
+      log,
+      accessConfig: parseAccessConfig({
+        ALLOWED_ORIGINS: "http://localhost:8080",
+        ALLOWED_HOSTS: "*",
+      }),
+    });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`, {
+      origin: "http://192.168.1.20:9080",
+    });
+    client.on("error", () => {});
+    await new Promise<void>((resolve) => {
+      client.once("unexpected-response", (_request, response) => {
+        response.resume();
+        resolve();
+      });
+    });
+
+    const message = log.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(message).toContain("http://192.168.1.20:9080");
+    expect(message).toContain("ALLOWED_ORIGINS");
+    wss.close();
+  });
+
+  // Behind the bundled nginx every socket comes from the proxy, so the log line
+  // would otherwise never name the device that was refused.
+  it("names the forwarded client address in a refusal", async () => {
+    const log = vi.fn();
+    const wss = startLocalRelay({
+      port: 0,
+      log,
+      accessConfig: parseAccessConfig({
+        ALLOWED_ORIGINS: "http://localhost:8080",
+        ALLOWED_HOSTS: "*",
+      }),
+    });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`, {
+      origin: "http://192.168.1.20:9080",
+      headers: { "x-forwarded-for": "192.168.1.55, 172.19.0.3" },
+    });
+    client.on("error", () => {});
+    await new Promise<void>((resolve) => {
+      client.once("unexpected-response", (_request, response) => {
+        response.resume();
+        resolve();
+      });
+    });
+
+    expect(log.mock.calls.map(([line]) => String(line)).join("\n")).toContain("192.168.1.55");
+    wss.close();
+  });
+
+  it("logs a rejected target with the origin that asked for it", async () => {
+    const log = vi.fn();
+    const wss = startLocalRelay({
+      port: 0,
+      log,
+      accessConfig: parseAccessConfig({
+        ALLOWED_ORIGINS: "http://localhost:8080",
+        ALLOWED_HOSTS: "ssh.example.com",
+      }),
+    });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`, {
+      origin: "http://localhost:8080",
+    });
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    const closed = new Promise<number>((resolve) => client.once("close", resolve));
+    client.send(encodeConnectFrame({ host: "evil.example", port: 22 }));
+    await closed;
+
+    const message = log.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(message).toContain("evil.example");
+    expect(message).toContain("http://localhost:8080");
+    expect(message).toContain("ALLOWED_HOSTS");
     wss.close();
   });
 

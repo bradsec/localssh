@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App.js";
+import { APP_VERSION } from "./appVersion.js";
 import { DEFAULT_FONT_FAMILY } from "./terminalFonts.js";
 import { DEFAULT_THEME_NAME } from "./terminalThemes.js";
 import * as engine from "./ssh/engine.js";
@@ -13,12 +14,17 @@ vi.mock("./ssh/engine.js", async () => {
 
 const terminalReset = vi.fn();
 const terminalFocus = vi.fn();
+const terminalBlur = vi.fn();
 let terminalActive = false;
+// The real terminal reports focus from the textarea's own events; the mock lets a
+// test drive that callback to stand in for the browser moving focus.
+let reportTerminalFocus: ((focused: boolean) => void) | undefined;
 
 vi.mock("./components/Terminal.js", () => ({
   Terminal: ({
     onResize,
     onReady,
+    onFocusChange,
     active,
   }: {
     onResize?: (cols: number, rows: number) => void;
@@ -26,12 +32,20 @@ vi.mock("./components/Terminal.js", () => ({
       write: (data: Uint8Array) => void;
       reset: () => void;
       focus: () => void;
+      blur: () => void;
     }) => void;
+    onFocusChange?: (focused: boolean) => void;
     active: boolean;
   }) => {
     terminalActive = active;
+    reportTerminalFocus = onFocusChange;
     onResize?.(48, 20);
-    onReady?.({ write: vi.fn(), reset: terminalReset, focus: terminalFocus });
+    onReady?.({
+      write: vi.fn(),
+      reset: terminalReset,
+      focus: terminalFocus,
+      blur: terminalBlur,
+    });
     return <div aria-label="SSH terminal emulator" />;
   },
 }));
@@ -41,7 +55,9 @@ describe("App", () => {
     vi.mocked(engine.connectSession).mockReset();
     terminalReset.mockClear();
     terminalFocus.mockClear();
+    terminalBlur.mockClear();
     terminalActive = false;
+    reportTerminalFocus = undefined;
     localStorage.clear();
   });
 
@@ -130,6 +146,44 @@ describe("App", () => {
     expect(terminalReset).toHaveBeenCalled();
   });
 
+  // On a phone the terminal is the only place to type, and nothing else on the
+  // page can give it focus once the connect form is gone.
+  it("focuses and blurs the terminal from the keyboard button", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/^host$/i), "10.0.0.11");
+    await user.type(screen.getByLabelText(/^username$/i), "admin");
+    await user.type(screen.getByLabelText(/^password$/i), "secret");
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+    const button = await screen.findByRole("button", { name: /^keyboard$/i });
+    terminalFocus.mockClear();
+    await user.click(button);
+    expect(terminalFocus).toHaveBeenCalled();
+
+    act(() => reportTerminalFocus?.(true));
+    const hide = screen.getByRole("button", { name: /hide keyboard/i });
+    expect(hide).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(hide);
+    expect(terminalBlur).toHaveBeenCalled();
+  });
+
+  // Which build someone is running is the first question when reporting a bug,
+  // and the connect panel is the one screen every user sees.
+  it("shows the running version on the connect panel", () => {
+    render(<App />);
+    expect(screen.getByText(`localssh ${APP_VERSION}`)).toBeInTheDocument();
+  });
+
+  it("hides the keyboard button while no session is connected", () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: /keyboard/i })).not.toBeInTheDocument();
+  });
+
   it("remembers only the host and port when the toggle is enabled", async () => {
     const { unmount } = render(<App />);
     const user = userEvent.setup();
@@ -170,7 +224,7 @@ describe("App", () => {
 
     await user.selectOptions(screen.getByLabelText(/font family/i), '"JetBrains Mono", monospace');
     await user.selectOptions(screen.getByLabelText(/color scheme/i), "Nord");
-    fireEvent.change(screen.getByLabelText(/font size/i), { target: { value: "18" } });
+    await user.selectOptions(screen.getByLabelText(/font size/i), "18");
 
     expect(JSON.parse(localStorage.getItem("terminalSettings") ?? "{}")).toMatchObject({
       fontFamily: '"JetBrains Mono", monospace',
@@ -182,7 +236,7 @@ describe("App", () => {
     render(<App />);
     expect(screen.getByLabelText(/font family/i)).toHaveValue('"JetBrains Mono", monospace');
     expect(screen.getByLabelText(/color scheme/i)).toHaveValue("Nord");
-    expect(screen.getByLabelText(/font size/i)).toHaveValue(18);
+    expect(screen.getByLabelText(/font size/i)).toHaveValue("18");
   });
 
   it("ignores invalid persisted terminal settings", () => {
@@ -194,7 +248,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByLabelText(/font size/i)).toHaveValue(14);
+    expect(screen.getByLabelText(/font size/i)).toHaveValue("14");
     expect(screen.getByLabelText(/font family/i)).toHaveValue(DEFAULT_FONT_FAMILY);
     expect(screen.getByLabelText(/color scheme/i)).toHaveValue(DEFAULT_THEME_NAME);
   });
