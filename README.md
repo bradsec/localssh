@@ -60,7 +60,7 @@ This tracks the `latest` tag. To move deliberately between releases, set the
 version in `.env` and recreate:
 
 ```dotenv
-LOCALSSH_VERSION=2026.07.25.3
+LOCALSSH_VERSION=2026.07.25.4
 ```
 
 Old images stay on disk after an update. Remove the ones no longer referenced
@@ -172,7 +172,7 @@ cp .env.example .env
 | `ALLOWED_PORTS` | `22` | Comma-separated target TCP ports. |
 
 `LOCALSSH_VERSION` selects the container image tag. Leave it unset to track the
-latest release, or set it to a release such as `2026.07.25.3` for repeatable
+latest release, or set it to a release such as `2026.07.25.4` for repeatable
 installs.
 
 Unless it is `*`, `ALLOWED_ORIGINS` must contain every exact URL used to open the
@@ -206,11 +206,11 @@ allocated, choose an unused `FRONTEND_PORT` and update `ALLOWED_ORIGINS`.
 
 localssh uses calendar versions in `YYYY.MM.DD` format. Same-day patch releases
 append a revision number as `YYYY.MM.DD.N`. The current release is
-`2026.07.25.3`.
+`2026.07.25.4`.
 
 The canonical version is stored in `VERSION` and passed to both container
 images as OCI metadata. The private npm packages use the SemVer-compatible
-equivalent (`2026.7.25+revision.3`) because SemVer forbids leading zeroes in
+equivalent (`2026.7.25+revision.4`) because SemVer forbids leading zeroes in
 numeric fields and represents the same-day revision as build metadata.
 
 The connect panel shows the running version, so anyone can read it without
