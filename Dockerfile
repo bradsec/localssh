@@ -1,4 +1,4 @@
-ARG VERSION=2026.07.25.5
+ARG VERSION=2026.07.25.6
 
 FROM golang:1.26.4-alpine AS engine
 WORKDIR /src/engine
