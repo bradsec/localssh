@@ -172,6 +172,30 @@ describe("App", () => {
     expect(terminalBlur).toHaveBeenCalled();
   });
 
+  // The shell follows the visual viewport only during a session. Doing it while
+  // the connect form is up leaves empty canvas below the shell, and the browser
+  // pans into it when it lifts a focused field above the keyboard.
+  it("takes its height from the visual viewport only while connected", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    expect(document.querySelector(".app-shell")).not.toHaveClass("app-shell--session");
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/^host$/i), "10.0.0.12");
+    await user.type(screen.getByLabelText(/^username$/i), "admin");
+    await user.type(screen.getByLabelText(/^password$/i), "secret");
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+    await waitFor(() =>
+      expect(document.querySelector(".app-shell")).toHaveClass("app-shell--session"),
+    );
+
+    await user.click(screen.getByRole("button", { name: /disconnect/i }));
+    expect(document.querySelector(".app-shell")).not.toHaveClass("app-shell--session");
+  });
+
   // Which build someone is running is the first question when reporting a bug,
   // and the connect panel is the one screen every user sees.
   it("shows the running version on the connect panel", () => {

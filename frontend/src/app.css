@@ -53,12 +53,8 @@ body,
   margin: 0;
 }
 
-/* --app-height is the visual viewport height, published by App.tsx while a
-   visual viewport exists; the dvh fallback covers the first paint and any browser
-   without one. Body and shell share it so the page has no spare height to
-   scroll: given any, iOS drifts the layout up behind the keyboard. */
 body {
-  min-height: var(--app-height, 100dvh);
+  min-height: 100dvh;
   overflow: hidden;
 }
 
@@ -116,11 +112,23 @@ h2 {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: var(--app-height, 100dvh);
-  min-height: var(--app-height, 100dvh);
+  height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
   color: var(--text);
   background: var(--canvas);
+}
+
+/* Only a running session follows the visual viewport (--app-height, published by
+   App.tsx). The terminal then refits into the space the on-screen keyboard
+   leaves, and because it fills the shell its cursor row stays above the keyboard.
+   The connect form keeps the full layout viewport on purpose: a browser pans the
+   page to lift a focused field above the keyboard, and a shell shorter than the
+   layout viewport gives it empty canvas to pan into, which reads as the form
+   disappearing behind a blank area. */
+.app-shell--session {
+  height: var(--app-height, 100dvh);
+  min-height: var(--app-height, 100dvh);
 }
 
 .app-toolbar {

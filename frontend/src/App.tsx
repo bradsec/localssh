@@ -37,8 +37,9 @@ export function App() {
   const terminalControlsRef = useRef<TerminalControls | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
 
-  // Sizes the shell to the space the on-screen keyboard leaves, so the prompt
-  // stays visible above it. The terminal refits from its own resize observer.
+  // Publishes the visual viewport height for the stylesheet. Only a connected
+  // session consumes it: see .app-shell--session for why the connect form must
+  // keep the full layout viewport instead.
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -130,7 +131,7 @@ export function App() {
   }, []);
 
   return (
-    <main className="app-shell">
+    <main className={status.kind === "connected" ? "app-shell app-shell--session" : "app-shell"}>
       <header className="app-toolbar">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">&gt;_</span>
