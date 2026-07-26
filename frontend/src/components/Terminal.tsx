@@ -181,7 +181,12 @@ export function Terminal({
     <div
       className="terminal"
       ref={containerRef}
-      style={{ "--terminal-background": theme.background } as CSSProperties}
+      style={
+        {
+          "--terminal-background": theme.background,
+          "--terminal-scrollbar": theme.foreground,
+        } as CSSProperties
+      }
     />
   );
 }

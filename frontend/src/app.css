@@ -358,6 +358,34 @@ h2 {
   scrollbar-gutter: stable;
 }
 
+/* xterm reduces a long scrollback buffer to a short thumb. Keep that thumb
+   clear of the frame edge and visible against every selectable terminal theme,
+   especially when a shorter browser window leaves little track to work with. */
+.terminal .xterm-scrollable-element > .scrollbar.vertical {
+  right: 2px !important;
+}
+
+.terminal .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--terminal-scrollbar, currentColor) 58%,
+    transparent
+  ) !important;
+}
+
+.terminal .xterm-scrollable-element > .scrollbar.vertical > .slider:hover {
+  background: color-mix(
+    in srgb,
+    var(--terminal-scrollbar, currentColor) 78%,
+    transparent
+  ) !important;
+}
+
+.terminal .xterm-scrollable-element > .scrollbar.vertical > .slider.active {
+  background: var(--terminal-scrollbar, currentColor) !important;
+}
+
 /* The keys an on-screen keyboard has none of, as a strip along the bottom of the
    shell and so directly above the keyboard. It scrolls sideways rather than
    wrapping or shrinking its keys: a row that reflows moves keys out from under
