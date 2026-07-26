@@ -1,0 +1,28 @@
+name: localssh
+
+services:
+  frontend:
+    image: ghcr.io/bradsec/localssh-frontend:${LOCALSSH_VERSION:-latest}
+    build:
+      context: .
+      args:
+        VERSION: ${LOCALSSH_VERSION:-development}
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-9080}:80"
+    depends_on:
+      - relay
+
+  relay:
+    image: ghcr.io/bradsec/localssh-relay:${LOCALSSH_VERSION:-latest}
+    build:
+      context: relay
+      args:
+        VERSION: ${LOCALSSH_VERSION:-development}
+    restart: unless-stopped
+    environment:
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:9080,http://127.0.0.1:9080}
+      ALLOWED_PORTS: ${ALLOWED_PORTS:-22}
+      MAX_SESSIONS: ${MAX_SESSIONS:-256}
+      TARGET_CONNECT_TIMEOUT_MS: ${TARGET_CONNECT_TIMEOUT_MS:-10000}

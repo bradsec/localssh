@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+
+# Build output. engine.wasm and wasm_exec.js are copied into frontend/public
+# by frontend/scripts/copy-engine.mjs on predev/prebuild, so they are never
+# needed in the repository.
+/engine/dist/
+/frontend/dist/
+/relay/dist/
+/frontend/public/engine.wasm
+/frontend/public/wasm_exec.js
+
+# Test and tooling artifacts
+/frontend/playwright-report/
+/frontend/test-results/
+/frontend/blob-report/
+.playwright-mcp/
+/desktop.png
+*.tsbuildinfo
+coverage/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Coding agent plans, notes, sessions, and worktrees. Local scratch only.
+.agent/
+.agents/
+.ai/
+.amazonq/
+.claude/
+.codex/
+.copilot/
+.cursor/
+.aider*
+.windsurf/
+.continue/
+.junie/
+.kilocode/
+.qodo/
+.roo/
+.cline*
+.gemini/
+.opencode/
+.plandex/
+.goose/
+.superpowers/
+AGENTS.md
+CLAUDE.local.md
+GEMINI.md
+docs/superpowers/
+
+# Editor and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

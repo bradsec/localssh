@@ -1,0 +1,13 @@
+.git
+.env
+AGENTS.md
+desktop.png
+frontend/blob-report
+frontend/dist
+frontend/node_modules
+frontend/playwright-report
+frontend/public/engine.wasm
+frontend/public/wasm_exec.js
+frontend/test-results
+engine/dist
+relay
