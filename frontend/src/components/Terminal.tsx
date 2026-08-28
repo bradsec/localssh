@@ -218,8 +218,29 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     verticalHistoryAllowed: boolean;
   } | null = null;
   let multiTouch = false;
+  // Set once a single-touch swipe has been recognised so the rest of that touch
+  // fires nothing further and the release is not mistaken for a tap.
+  let handled = false;
   let twoFingerY: number | null = null;
   let twoFingerRemainder = 0;
+
+  // Recognises the swipe from the movement so far rather than waiting for the
+  // release. On iOS the browser owns the vertical pan (touch-action: pan-y) and
+  // dispatches pointercancel the instant it starts scrolling xterm's viewport,
+  // which used to abort the history flick before pointerup could classify it.
+  const recogniseInFlight = (event: PointerEvent) => {
+    if (multiTouch || handled || !start || active.size !== 1) return;
+    const gesture = classifyGesture({
+      dx: event.clientX - start.x,
+      dy: event.clientY - start.y,
+      dt: event.timeStamp - start.at,
+      atBottom: isViewportAtBottom(targets.term),
+      verticalHistoryAllowed: start.verticalHistoryAllowed,
+    });
+    if (!gesture) return;
+    handled = true;
+    targets.onInput(gestureToInput(gesture, isApplicationCursorMode(targets.term)));
+  };
 
   const activeCentroidY = () => {
     let total = 0;
@@ -241,6 +262,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
         verticalHistoryAllowed: !targets.smallScreenIOS || startsNearPrompt,
       };
       multiTouch = false;
+      handled = false;
     } else {
       // A second finger explicitly drives scrollback, never shell input.
       start = null;
@@ -255,6 +277,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   const onPointerMove = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    recogniseInFlight(event);
     if (!multiTouch || active.size !== 2 || twoFingerY === null) return;
 
     const nextY = activeCentroidY();
@@ -281,6 +304,16 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       if (active.size === 0) multiTouch = false;
       return;
     }
+
+    // The swipe already fired from the movement; the release closes it out.
+    if (handled) {
+      if (active.size === 0) {
+        start = null;
+        handled = false;
+      }
+      return;
+    }
+
     if (!start || active.size > 0) return;
 
     const sample = {

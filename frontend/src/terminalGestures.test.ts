@@ -77,6 +77,28 @@ describe("classifyGesture", () => {
     ).toBeNull();
   });
 
+  // The budget was widened for tablet-sized flicks: a 400 ms, 200 px upward
+  // flick is a history recall, not a scroll.
+  it("accepts a tablet-paced flick inside the widened budget", () => {
+    expect(
+      classifyGesture({
+        dx: 4,
+        dy: -200,
+        dt: 400,
+        atBottom: true,
+        verticalHistoryAllowed: true,
+      }),
+    ).toBe("up");
+  });
+
+  // What the in-flight recogniser in Terminal.tsx leans on: a swipe is classified
+  // from a partial sample taken mid-gesture, before the release.
+  it("recognises a horizontal swipe from an early, brief sample", () => {
+    expect(
+      classifyGesture({ dx: 46, dy: 5, dt: 30, atBottom: true, verticalHistoryAllowed: true }),
+    ).toBe("tab");
+  });
+
   it("leaves a vertical flick to scrolling outside the history gesture area", () => {
     expect(
       classifyGesture({

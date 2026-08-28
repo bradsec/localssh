@@ -28,10 +28,14 @@ export interface GestureSample {
 const MIN_TRAVEL_PX = 44;
 /** A swipe must be this much longer on its main axis to count as that axis. */
 const AXIS_RATIO = 1.6;
-/** Vertical flicks must complete this quickly to outrank scrolling. */
-const FLICK_MAX_MS = 300;
+/**
+ * Vertical flicks must complete this quickly to outrank scrolling. A deliberate
+ * one-finger flick on an 11 to 13 inch tablet routinely runs to about 400 ms, so
+ * a tighter budget rejected the gesture the touch-key legend advertises.
+ */
+const FLICK_MAX_MS = 450;
 /** Beyond this travel a vertical move reads as a scroll drag, not a flick. */
-const FLICK_MAX_TRAVEL_PX = 160;
+const FLICK_MAX_TRAVEL_PX = 220;
 /** Travel a touch may drift and still count as a tap. */
 const TAP_MAX_TRAVEL_PX = 10;
 
