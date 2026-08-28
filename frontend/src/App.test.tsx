@@ -25,6 +25,9 @@ let terminalActive = false;
 // report the focus a phone's keyboard follows.
 let terminalInput: ((data: string) => void) | undefined;
 let terminalFocusChange: ((focused: boolean) => void) | undefined;
+let terminalSelectionChange: ((hasSelection: boolean) => void) | undefined;
+const terminalPaste = vi.fn();
+let terminalSelectionText = "";
 
 vi.mock("./components/Terminal.js", () => ({
   Terminal: ({
@@ -32,6 +35,7 @@ vi.mock("./components/Terminal.js", () => ({
     onReady,
     onInput,
     onFocusChange,
+    onSelectionChange,
     active,
   }: {
     onResize?: (cols: number, rows: number) => void;
@@ -41,14 +45,18 @@ vi.mock("./components/Terminal.js", () => ({
       focus: () => void;
       blur: () => void;
       applicationCursorMode: () => boolean;
+      getSelection: () => string;
+      paste: (text: string) => void;
     }) => void;
     onInput?: (data: string) => void;
     onFocusChange?: (focused: boolean) => void;
+    onSelectionChange?: (hasSelection: boolean) => void;
     active: boolean;
   }) => {
     terminalActive = active;
     terminalInput = onInput;
     terminalFocusChange = onFocusChange;
+    terminalSelectionChange = onSelectionChange;
     onResize?.(48, 20);
     onReady?.({
       write: vi.fn(),
@@ -56,6 +64,8 @@ vi.mock("./components/Terminal.js", () => ({
       focus: terminalFocus,
       blur: terminalBlur,
       applicationCursorMode: () => false,
+      getSelection: () => terminalSelectionText,
+      paste: terminalPaste,
     });
     return <div aria-label="SSH terminal emulator" />;
   },
@@ -102,6 +112,9 @@ describe("App", () => {
     terminalActive = false;
     terminalInput = undefined;
     terminalFocusChange = undefined;
+    terminalSelectionChange = undefined;
+    terminalPaste.mockClear();
+    terminalSelectionText = "";
     usePointer("fine");
     localStorage.clear();
   });
@@ -417,6 +430,53 @@ describe("App", () => {
 
     expect(sentBytes(handle)).toBe("\x01\x02c");
     expect(ctrl).toHaveAttribute("aria-pressed", "false");
+  });
+
+  // The clipboard menu is a session tool: copy needs terminal output to select,
+  // and paste needs somewhere to send it.
+  it("offers the clipboard menu only during a session", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    expect(screen.queryByRole("button", { name: /^clipboard/i })).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.30");
+    expect(screen.getByRole("button", { name: /^clipboard/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /disconnect/i }));
+    expect(screen.queryByRole("button", { name: /^clipboard/i })).not.toBeInTheDocument();
+  });
+
+  it("sends text pasted through the clipboard menu to the session", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.31");
+
+    const field = screen.getByLabelText("Paste here");
+    await user.click(field);
+    await user.paste("whoami\n");
+
+    expect(terminalPaste).toHaveBeenCalledWith("whoami\n");
+  });
+
+  it("reflects a terminal selection in the clipboard menu's accessible name", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.32");
+
+    expect(screen.getByRole("button", { name: "Clipboard" })).toBeInTheDocument();
+    act(() => terminalSelectionChange?.(true));
+    expect(
+      screen.getByRole("button", { name: "Clipboard, selection ready to copy" }),
+    ).toBeInTheDocument();
   });
 
   it("ignores invalid persisted terminal settings", () => {

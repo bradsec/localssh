@@ -24,6 +24,10 @@ export interface TerminalControls {
   blur: () => void;
   /** Whether cursor keys currently take their application encoding. */
   applicationCursorMode: () => boolean;
+  /** The text the user has selected in the terminal, empty when none. */
+  getSelection: () => string;
+  /** Inserts text as if pasted, honouring the terminal's bracketed-paste mode. */
+  paste: (text: string) => void;
 }
 
 export interface TerminalProps {
@@ -32,6 +36,8 @@ export interface TerminalProps {
   onResize: (cols: number, rows: number) => void;
   /** Reports terminal focus, which on a phone is the on-screen keyboard being up. */
   onFocusChange?: (focused: boolean) => void;
+  /** Reports whether the terminal currently holds a text selection. */
+  onSelectionChange?: (hasSelection: boolean) => void;
   fontSize: number;
   fontFamily: string;
   theme: ITheme;
@@ -43,6 +49,7 @@ export function Terminal({
   onInput,
   onResize,
   onFocusChange,
+  onSelectionChange,
   fontSize,
   fontFamily,
   theme,
@@ -56,6 +63,8 @@ export function Terminal({
   // through a ref rather than closing over the one it was mounted with.
   const onFocusChangeRef = useRef(onFocusChange);
   onFocusChangeRef.current = onFocusChange;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -80,12 +89,17 @@ export function Terminal({
 
     const dataSubscription = term.onData(onInput);
     const resizeSubscription = term.onResize(({ cols, rows }) => onResize(cols, rows));
+    const selectionSubscription = term.onSelectionChange(() =>
+      onSelectionChangeRef.current?.(term.hasSelection()),
+    );
     onReady({
       write: (data) => term.write(data),
       reset: () => term.reset(),
       focus: () => term.focus(),
       blur: () => term.blur(),
       applicationCursorMode: () => isApplicationCursorMode(term),
+      getSelection: () => term.getSelection(),
+      paste: (text) => term.paste(text),
     });
 
     // The hidden textarea is the element that holds focus, and on a phone the
@@ -127,6 +141,7 @@ export function Terminal({
       detachGestures();
       dataSubscription.dispose();
       resizeSubscription.dispose();
+      selectionSubscription.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;

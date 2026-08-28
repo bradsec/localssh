@@ -27,8 +27,9 @@ others discover the project.
   size, system or bundled monospace fonts, persistent colour schemes,
   scrollback, automatic PTY resizing, and full-screen sessions.
 - **Phone and tablet controls.** The responsive interface includes a
-  [touch key bar](#key-bar), sticky Ctrl and Alt modifiers, terminal gestures,
-  keyboard-aware viewport fitting, and 44px touch targets.
+  [touch key bar](#key-bar), sticky Ctrl and Alt modifiers, terminal gestures, a
+  [clipboard menu](#clipboard), keyboard-aware viewport fitting, and 44px touch
+  targets.
 - **Self-hosted LAN deployment.** Docker Compose serves the frontend and relay
   through one port. Origin, target host, target port, concurrent session, and
   connection-time limits constrain relay access and resource use.
@@ -383,8 +384,25 @@ For devices with no physical Tab or arrow keys:
 | Swipe left         | Esc              |
 | Flick up or down   | Command history  |
 
-Vertical flicks defer to scrollback: while you are reading history, vertical
-drags scroll normally. Dragging with two fingers scrolls the output.
+The gesture is recognised from the movement itself, not the release, so it still
+lands on iPadOS, where Safari cancels the touch as soon as it starts scrolling.
+Vertical flicks defer to scrollback: a flick must be quick and short, while a
+slower or longer vertical drag scrolls history normally. Dragging with two
+fingers scrolls the output.
+
+### Clipboard
+
+A touch browser gives no way to copy from or paste into the terminal surface
+without a hardware keyboard, so a **Clipboard** menu sits in the session toolbar:
+
+| Control                | Action                                                     |
+| ---------------------- | ---------------------------------------------------------- |
+| Copy selection         | Copies the current terminal selection. Enabled only while text is selected. |
+| Paste here             | A field to paste into with the on-screen callout; its contents are sent to the session. |
+| Paste from clipboard   | Reads the system clipboard directly and sends it. Best effort: the browser blocks clipboard reads on the plain-HTTP LAN deployment, and the paste field is the fallback. |
+
+A dot on the menu marks when the terminal has a selection ready to copy, and
+turns green once that selection has been copied.
 
 ## Development
 

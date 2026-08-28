@@ -269,7 +269,8 @@ h2 {
    in size, weight, or colour. */
 .toolbar-button,
 .terminal-settings summary,
-.about summary {
+.about summary,
+.clipboard-menu summary {
   display: inline-flex;
   gap: 6px;
   min-height: 36px;
@@ -290,13 +291,15 @@ h2 {
 }
 
 .terminal-settings summary::-webkit-details-marker,
-.about summary::-webkit-details-marker {
+.about summary::-webkit-details-marker,
+.clipboard-menu summary::-webkit-details-marker {
   display: none;
 }
 
 .toolbar-button:hover,
 .terminal-settings summary:hover,
-.about summary:hover {
+.about summary:hover,
+.clipboard-menu summary:hover {
   border-color: var(--border);
   color: var(--text);
   background: var(--surface);
@@ -973,7 +976,8 @@ h2 {
 .button:active,
 .toolbar-button:active,
 .terminal-settings summary:active,
-.about summary:active {
+.about summary:active,
+.clipboard-menu summary:active {
   transform: translateY(1px);
 }
 
@@ -1344,6 +1348,106 @@ h2 {
   line-height: 1.5;
 }
 
+.clipboard-menu {
+  position: relative;
+}
+
+/* A dot on the summary: accent when the terminal has a selection to copy, and a
+   success tint once that selection has been copied. */
+.clipboard-menu__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.clipboard-menu__dot--copied {
+  background: var(--success, #2f9e58);
+}
+
+.clipboard-menu__panel {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 18px 48px rgb(13 14 25 / 0.22);
+}
+
+.clipboard-menu__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.clipboard-menu__action {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--surface-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.clipboard-menu__action:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.clipboard-menu__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.clipboard-menu__field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.clipboard-menu__field textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  resize: none;
+}
+
+.clipboard-menu__row {
+  display: flex;
+  gap: 8px;
+}
+
+.clipboard-menu__row .clipboard-menu__action {
+  flex: 1;
+}
+
+.clipboard-menu__feedback {
+  margin: 0;
+  min-height: 1.1em;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 /* Gestures have no visible affordance, so the panel doubles as their legend. */
 .gesture-legend {
   display: grid;
@@ -1429,7 +1533,8 @@ h2 {
   }
 
   .terminal-settings summary,
-  .about summary {
+  .about summary,
+  .clipboard-menu summary {
     padding: 0 9px;
   }
 
@@ -1506,7 +1611,8 @@ h2 {
   /* Stay at or above the 44px iOS touch target even as type scales down. */
   .toolbar-button,
   .terminal-settings summary,
-  .about summary {
+  .about summary,
+  .clipboard-menu summary {
     min-height: 44px;
     padding: 0 10px;
     font-size: 0.72rem;

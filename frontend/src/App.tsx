@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { About } from "./components/About.js";
+import { ClipboardMenu } from "./components/ClipboardMenu.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
 import { Icon } from "./components/Icon.js";
@@ -57,6 +58,7 @@ export function App() {
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
   const [touchPointer] = useState(hasTouchPointer);
   const [terminalFocused, setTerminalFocused] = useState(false);
+  const [terminalHasSelection, setTerminalHasSelection] = useState(false);
   const [modifiers, setModifiers] = useState<ModifierState>(NO_MODIFIERS);
   const handleRef = useRef<SshHandle | null>(null);
   const terminalControlsRef = useRef<TerminalControls | null>(null);
@@ -158,6 +160,7 @@ export function App() {
             terminalControlsRef.current?.reset();
             terminalControlsRef.current?.blur();
             updateModifiers(NO_MODIFIERS);
+            setTerminalHasSelection(false);
             setStatus({ kind: "idle" });
           },
         });
@@ -204,6 +207,7 @@ export function App() {
     terminalControlsRef.current?.reset();
     terminalControlsRef.current?.blur();
     updateModifiers(NO_MODIFIERS);
+    setTerminalHasSelection(false);
     setStatus({ kind: "idle" });
   }, [updateModifiers]);
 
@@ -236,6 +240,13 @@ export function App() {
               <span>Disconnect</span>
             </button>
           )}
+          {status.kind === "connected" && (
+            <ClipboardMenu
+              hasSelection={terminalHasSelection}
+              getSelection={() => terminalControlsRef.current?.getSelection() ?? ""}
+              onPaste={(text) => terminalControlsRef.current?.paste(text)}
+            />
+          )}
           <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
           <About />
         </div>
@@ -262,6 +273,7 @@ export function App() {
               }}
               onInput={sendInput}
               onFocusChange={setTerminalFocused}
+              onSelectionChange={setTerminalHasSelection}
               onResize={(cols, rows) => {
                 // Held in a ref rather than state: nothing on the page displays
                 // the geometry, and a re-fit must not cost a render.
