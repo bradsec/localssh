@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"syscall/js"
@@ -47,8 +48,14 @@ type Conn struct {
 	closeCh   chan struct{}
 	closeOnce sync.Once
 
-	listenersMu sync.Mutex
-	listeners   []eventListener
+	deadlineMu      sync.Mutex
+	readDeadline    time.Time
+	writeDeadline   time.Time
+	deadlineChanged chan struct{}
+
+	listenersMu   sync.Mutex
+	listeners     []eventListener
+	listenersOnce sync.Once
 }
 
 type eventListener struct {
@@ -78,9 +85,10 @@ func Dial(ctx context.Context, wsURL, host, port string) (*Conn, error) {
 	ws.Set("binaryType", "arraybuffer")
 
 	c := &Conn{
-		ws:      ws,
-		notify:  make(chan struct{}, 1),
-		closeCh: make(chan struct{}),
+		ws:              ws,
+		notify:          make(chan struct{}, 1),
+		closeCh:         make(chan struct{}),
+		deadlineChanged: make(chan struct{}, 1),
 	}
 	dialResult := make(chan error, 1)
 
@@ -210,8 +218,10 @@ func (c *Conn) Read(p []byte) (int, error) {
 			continue
 		}
 
+		if err := c.waitForRead(); err != nil {
+			return 0, err
+		}
 		select {
-		case <-c.notify:
 		case <-c.closeCh:
 			c.queueMu.Lock()
 			hasQueuedData := len(c.queue) > 0
@@ -219,7 +229,42 @@ func (c *Conn) Read(p []byte) (int, error) {
 			if !hasQueuedData {
 				return 0, io.EOF
 			}
+		default:
 		}
+	}
+}
+
+func (c *Conn) waitForRead() error {
+	c.deadlineMu.Lock()
+	deadline := c.readDeadline
+	c.deadlineMu.Unlock()
+
+	if deadline.IsZero() {
+		select {
+		case <-c.notify:
+			return nil
+		case <-c.closeCh:
+			return nil
+		case <-c.deadlineChanged:
+			return nil
+		}
+	}
+
+	wait := time.Until(deadline)
+	if wait <= 0 {
+		return os.ErrDeadlineExceeded
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-c.notify:
+		return nil
+	case <-c.closeCh:
+		return nil
+	case <-c.deadlineChanged:
+		return nil
+	case <-timer.C:
+		return os.ErrDeadlineExceeded
 	}
 }
 
@@ -235,6 +280,12 @@ func (c *Conn) Write(p []byte) (int, error) {
 	case <-c.closeCh:
 		return 0, net.ErrClosed
 	default:
+	}
+	c.deadlineMu.Lock()
+	deadline := c.writeDeadline
+	c.deadlineMu.Unlock()
+	if !deadline.IsZero() && time.Until(deadline) <= 0 {
+		return 0, os.ErrDeadlineExceeded
 	}
 	if err := c.send(p); err != nil {
 		return 0, err
@@ -290,25 +341,55 @@ func (c *Conn) signalClosed() {
 		case c.notify <- struct{}{}:
 		default:
 		}
+		go c.releaseListeners()
 	})
 }
 
 func (c *Conn) releaseListeners() {
-	c.listenersMu.Lock()
-	defer c.listenersMu.Unlock()
+	c.listenersOnce.Do(func() {
+		c.listenersMu.Lock()
+		defer c.listenersMu.Unlock()
 
-	for _, listener := range c.listeners {
-		c.ws.Call("removeEventListener", listener.name, listener.fn)
-		listener.fn.Release()
-	}
-	c.listeners = nil
+		for _, listener := range c.listeners {
+			c.ws.Call("removeEventListener", listener.name, listener.fn)
+			listener.fn.Release()
+		}
+		c.listeners = nil
+	})
 }
 
-func (c *Conn) LocalAddr() net.Addr                { return stubAddr{} }
-func (c *Conn) RemoteAddr() net.Addr               { return stubAddr{} }
-func (c *Conn) SetDeadline(t time.Time) error      { return nil }
-func (c *Conn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *Conn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *Conn) LocalAddr() net.Addr  { return stubAddr{} }
+func (c *Conn) RemoteAddr() net.Addr { return stubAddr{} }
+func (c *Conn) SetDeadline(t time.Time) error {
+	c.deadlineMu.Lock()
+	c.readDeadline = t
+	c.writeDeadline = t
+	c.deadlineMu.Unlock()
+	c.signalDeadlineChanged()
+	return nil
+}
+
+func (c *Conn) SetReadDeadline(t time.Time) error {
+	c.deadlineMu.Lock()
+	c.readDeadline = t
+	c.deadlineMu.Unlock()
+	c.signalDeadlineChanged()
+	return nil
+}
+
+func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.deadlineMu.Lock()
+	c.writeDeadline = t
+	c.deadlineMu.Unlock()
+	return nil
+}
+
+func (c *Conn) signalDeadlineChanged() {
+	select {
+	case c.deadlineChanged <- struct{}{}:
+	default:
+	}
+}
 
 type stubAddr struct{}
 

@@ -7,14 +7,12 @@ import (
 	"testing"
 )
 
-func ptr(s string) *string { return &s }
-
 func TestUpsertAddsAndUpdates(t *testing.T) {
 	d := NewDocument()
 
 	if err := d.Upsert(EntryUpdate{
 		ID: "a", Nickname: "web", Host: "10.0.0.4", Port: 22,
-		Username: "deploy", Password: ptr("hunter2"),
+		Username: "deploy", Password: new("hunter2"),
 	}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -40,7 +38,7 @@ func TestUpsertAddsAndUpdates(t *testing.T) {
 // display a password it never receives. An empty string means "clear it".
 func TestUpsertKeepsPasswordWhenAbsent(t *testing.T) {
 	d := NewDocument()
-	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: ptr("hunter2")})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: new("hunter2")})
 
 	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: nil})
 
@@ -52,9 +50,9 @@ func TestUpsertKeepsPasswordWhenAbsent(t *testing.T) {
 
 func TestUpsertClearsPasswordWhenEmpty(t *testing.T) {
 	d := NewDocument()
-	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: ptr("hunter2")})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: new("hunter2")})
 
-	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: ptr("")})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: new("")})
 
 	if _, ok := d.PasswordFor("a"); ok {
 		t.Fatal("password survived an explicit clear")
@@ -64,7 +62,7 @@ func TestUpsertClearsPasswordWhenEmpty(t *testing.T) {
 // Dropping to "host only" must not leave an orphaned username behind.
 func TestUpsertClearingUsernameAlsoClearsPassword(t *testing.T) {
 	d := NewDocument()
-	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: ptr("hunter2")})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: new("hunter2")})
 
 	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "", Password: nil})
 
@@ -132,7 +130,7 @@ func TestDelete(t *testing.T) {
 // password field, not even an empty one.
 func TestRedactedNeverCarriesAPassword(t *testing.T) {
 	d := NewDocument()
-	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: ptr("hunter2")})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: new("hunter2")})
 	_ = d.Upsert(EntryUpdate{ID: "b", Nickname: "nas", Host: "h2", Port: 22})
 
 	encoded, err := json.Marshal(d.Redacted())
@@ -157,7 +155,7 @@ func TestRedactedNeverCarriesAPassword(t *testing.T) {
 
 func TestMarshalParseRoundTrip(t *testing.T) {
 	d := NewDocument()
-	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: ptr("hunter2")})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Username: "u", Password: new("hunter2")})
 
 	encoded, err := d.Marshal()
 	if err != nil {

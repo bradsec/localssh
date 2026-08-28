@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"sync"
 	"syscall/js"
 
@@ -107,6 +109,7 @@ func vaultUnlock(args []js.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clear(plaintext)
 	document, err := vault.ParseDocument(plaintext)
 	if err != nil {
 		session.Zero()
@@ -152,7 +155,12 @@ func vaultUpsert(args []js.Value) (any, error) {
 		Username string  `json:"username"`
 		Password *string `json:"password"`
 	}
-	if err := json.Unmarshal([]byte(values[0]), &wire); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(values[0]))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return nil, fmt.Errorf("vault: malformed entry: %w", err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
 		return nil, fmt.Errorf("vault: malformed entry: %w", err)
 	}
 
@@ -214,10 +222,11 @@ func vaultChangePassword(args []js.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	verified, _, err := vault.Unlock(blob, values[0])
+	verified, plaintext, err := vault.Unlock(blob, values[0])
 	if err != nil {
 		return nil, err
 	}
+	clear(plaintext)
 	verified.Zero()
 
 	next, err := vault.Create(values[1], unlocked.session.Params())
@@ -232,6 +241,14 @@ func vaultChangePassword(args []js.Value) (any, error) {
 	unlocked.session.Zero()
 	unlocked.session = next
 	return blob, nil
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return errors.New("trailing JSON")
+	}
+	return nil
 }
 
 func vaultLock(args []js.Value) (any, error) {

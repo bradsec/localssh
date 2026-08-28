@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   changeMasterPassword,
   createVault,
@@ -49,10 +49,13 @@ export function useVault(): VaultApi {
   const [entries, setEntries] = useState<SavedEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const actionInFlight = useRef(false);
 
   // Every action funnels through here so that no rejection reaches a component
   // and the busy flag can never be left stuck on.
   const run = useCallback(async (action: () => Promise<void>): Promise<boolean> => {
+    if (actionInFlight.current) return false;
+    actionInFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -65,6 +68,7 @@ export function useVault(): VaultApi {
       setError(failure instanceof Error ? failure.message : String(failure));
       return false;
     } finally {
+      actionInFlight.current = false;
       setBusy(false);
     }
   }, []);

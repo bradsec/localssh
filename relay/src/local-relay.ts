@@ -73,6 +73,16 @@ function describeClient(request: IncomingMessage): string {
   return request.socket.remoteAddress ?? "unknown address";
 }
 
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+function assertPositiveInteger(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+}
+
 export function startLocalRelay({
   port,
   host = "127.0.0.1",
@@ -85,8 +95,16 @@ export function startLocalRelay({
   targetConnector = createConnection,
   log = (message) => console.warn(message),
 }: LocalRelayOptions): WebSocketServer {
-  if (!Number.isInteger(maxSessions) || maxSessions < 1) {
-    throw new Error("maxSessions must be a positive integer");
+  if (!isLoopbackHost(host) && !accessConfig) {
+    throw new Error("accessConfig is required when binding the relay beyond loopback");
+  }
+  assertPositiveInteger("connectFrameTimeoutMs", connectFrameTimeoutMs);
+  assertPositiveInteger("pauseWatermarkBytes", pauseWatermarkBytes);
+  assertPositiveInteger("resumeWatermarkBytes", resumeWatermarkBytes);
+  assertPositiveInteger("maxSessions", maxSessions);
+  assertPositiveInteger("targetConnectTimeoutMs", targetConnectTimeoutMs);
+  if (resumeWatermarkBytes >= pauseWatermarkBytes) {
+    throw new Error("resumeWatermarkBytes must be less than pauseWatermarkBytes");
   }
 
   let wss: WebSocketServer;

@@ -406,7 +406,7 @@ turns green once that selection has been copied.
 
 ## Development
 
-Development from source requires Go 1.26 or newer and Node.js 22 or newer.
+Development from source requires Go 1.27 or newer and Node.js 24 or newer.
 
 ```bash
 # Engine

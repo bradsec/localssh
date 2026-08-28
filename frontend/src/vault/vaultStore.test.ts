@@ -71,8 +71,8 @@ describe("vaultStore", () => {
     expect(isStorageAvailable()).toBe(false);
   });
 
-  // Reads and cleanup degrade safely. A failed write must be reported because
-  // pretending it persisted would put WASM state ahead of storage.
+  // Reads degrade safely. Failed writes and deletion must be reported because
+  // pretending either succeeded would put UI state ahead of storage.
   it("survives a throwing localStorage", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new DOMException("blocked", "SecurityError");
@@ -88,7 +88,7 @@ describe("vaultStore", () => {
     expect(loadVaultBlob()).toBeNull();
     expect(hasVaultBlob()).toBe(false);
     expect(() => saveVaultBlob(validBlob)).toThrowError(/storage is unavailable/i);
-    expect(() => clearVaultBlob()).not.toThrow();
+    expect(() => clearVaultBlob()).toThrowError(/storage is unavailable/i);
   });
 
   it("throws a typed error when the quota is exceeded", () => {

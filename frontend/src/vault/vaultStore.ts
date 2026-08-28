@@ -72,7 +72,7 @@ export function clearVaultBlob(): void {
   try {
     localStorage.removeItem(VAULT_STORAGE_KEY);
   } catch {
-    // Storage is unavailable; there was nothing stored to remove.
+    throw new StorageUnavailableError();
   }
 }
 

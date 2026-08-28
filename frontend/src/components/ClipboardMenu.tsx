@@ -26,18 +26,8 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
 
-  // The selection changing is a fresh chance to copy, so a stale confirmation
-  // must not linger over it.
   useEffect(() => {
-    setCopied(false);
-  }, [hasSelection]);
-
-  useEffect(() => {
-    if (!open) {
-      setStatus("");
-      if (pasteFieldRef.current) pasteFieldRef.current.value = "";
-      return;
-    }
+    if (!open) return;
 
     const closeOnOutside = (event: Event) => {
       if (!detailsRef.current?.contains(event.target as Node)) setOpen(false);
@@ -103,7 +93,15 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
       className="clipboard-menu"
       ref={detailsRef}
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setStatus("");
+          setCopied(false);
+          if (pasteFieldRef.current) pasteFieldRef.current.value = "";
+        }
+      }}
     >
       <summary role="button" aria-label={summaryLabel}>
         <ClipboardMark />

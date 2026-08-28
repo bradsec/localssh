@@ -58,6 +58,14 @@ describe("connectSession", () => {
 });
 
 describe("instantiateEngine", () => {
+  it("rejects an unsuccessful HTTP response before compilation", async () => {
+    const streaming = vi.spyOn(WebAssembly, "instantiateStreaming");
+    const response = new Response("not found", { status: 404 });
+
+    await expect(instantiateEngine(response, {})).rejects.toThrow("HTTP 404");
+    expect(streaming).not.toHaveBeenCalled();
+  });
+
   it("falls back to buffered compilation when streaming rejects the MIME type", async () => {
     const instance = {} as WebAssembly.Instance;
     const streaming = vi

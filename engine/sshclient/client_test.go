@@ -27,7 +27,7 @@ func TestConnectAuthAndEcho(t *testing.T) {
 		return nil // accept on first use
 	}
 
-	session, err := Connect(context.Background(), conn, server.Addr, "tester", "s3cret", verify)
+	session, err := Connect(t.Context(), conn, server.Addr, "tester", "s3cret", verify)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestConnectRejectsBadPassword(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	_, err = Connect(context.Background(), conn, server.Addr, "tester", "wrong", func(string, HostKeyFingerprint) error { return nil })
+	_, err = Connect(t.Context(), conn, server.Addr, "tester", "wrong", func(string, HostKeyFingerprint) error { return nil })
 	if err == nil {
 		t.Fatal("expected auth failure, got nil error")
 	}
@@ -111,7 +111,7 @@ func TestConnectRejectsHostKey(t *testing.T) {
 		return sentinel
 	}
 
-	session, err := Connect(context.Background(), conn, server.Addr, "tester", "s3cret", verify)
+	session, err := Connect(t.Context(), conn, server.Addr, "tester", "s3cret", verify)
 	if err == nil {
 		t.Fatal("expected error from rejected host key, got nil")
 	}
@@ -135,7 +135,7 @@ func TestConnectCanceledContext(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	session, err := Connect(ctx, conn, server.Addr, "tester", "s3cret", func(string, HostKeyFingerprint) error { return nil })
@@ -147,6 +147,16 @@ func TestConnectCanceledContext(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestConnectRequiresHostKeyVerifier(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	if _, err := Connect(t.Context(), client, "host:22", "tester", "secret", nil); err == nil {
+		t.Fatal("Connect accepted a nil host-key verifier")
 	}
 }
 
@@ -174,7 +184,7 @@ func TestConnectTimesOutOnSilentPeer(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
 	defer cancel()
 
 	done := make(chan error, 1)

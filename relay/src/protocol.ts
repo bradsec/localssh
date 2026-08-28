@@ -8,10 +8,17 @@ function isValidPort(port: unknown): port is number {
 }
 
 function isValidHost(host: unknown): host is string {
-  if (typeof host !== "string" || host === "") return false;
+  if (typeof host !== "string" || host === "" || host.length > 253) return false;
   return !Array.from(host).some((character) => {
     const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
+    return (
+      codePoint <= 0x1f ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      codePoint === 0x2028 ||
+      codePoint === 0x2029 ||
+      (codePoint >= 0x202a && codePoint <= 0x202e) ||
+      (codePoint >= 0x2066 && codePoint <= 0x2069)
+    );
   });
 }
 

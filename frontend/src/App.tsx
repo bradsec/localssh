@@ -61,6 +61,7 @@ export function App() {
   const [terminalHasSelection, setTerminalHasSelection] = useState(false);
   const [modifiers, setModifiers] = useState<ModifierState>(NO_MODIFIERS);
   const handleRef = useRef<SshHandle | null>(null);
+  const connectionAttemptRef = useRef(0);
   const terminalControlsRef = useRef<TerminalControls | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
   // Input arrives from the terminal outside React's render cycle, so the armed
@@ -137,6 +138,7 @@ export function App() {
 
   const attemptConnect = useCallback(
     async (values: ConnectFormValues) => {
+      const attempt = ++connectionAttemptRef.current;
       setStatus({ kind: "connecting" });
       const hostPort = `${values.host}:${values.port}`;
       let knownHosts = new Map<string, string>();
@@ -152,6 +154,7 @@ export function App() {
           isTrustedFingerprint: (fingerprint) => knownHosts.get(hostPort) === fingerprint,
           onData: (chunk) => terminalControlsRef.current?.write(chunk),
           onClose: () => {
+            if (connectionAttemptRef.current !== attempt) return;
             handleRef.current = null;
             setActiveTarget(null);
             // Wipe the screen so a closed session's output is not left on
@@ -164,12 +167,17 @@ export function App() {
             setStatus({ kind: "idle" });
           },
         });
+        if (connectionAttemptRef.current !== attempt) {
+          handle.close();
+          return;
+        }
         handleRef.current = handle;
         setActiveTarget(`${values.username}@${hostPort}`);
         handle.resize(terminalSizeRef.current.cols, terminalSizeRef.current.rows);
         setStatus({ kind: "connected" });
         requestAnimationFrame(() => terminalControlsRef.current?.focus());
       } catch (error) {
+        if (connectionAttemptRef.current !== attempt) return;
         if (error instanceof HostKeyRejectedError) {
           const previousFingerprint = knownHosts.get(hostPort);
           setStatus({
@@ -193,14 +201,22 @@ export function App() {
 
   const trustAndRetry = useCallback(async () => {
     if (status.kind !== "unknown-host") return;
-    await trustHostKey(status.hostPort, status.fingerprint);
-    await attemptConnect(status.pending);
+    try {
+      await trustHostKey(status.hostPort, status.fingerprint);
+      await attemptConnect(status.pending);
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }, [status, attemptConnect]);
 
   const terminalTheme =
     TERMINAL_THEMES[terminalSettings.themeName] ?? TERMINAL_THEMES[DEFAULT_THEME_NAME] ?? {};
 
   const disconnect = useCallback(() => {
+    connectionAttemptRef.current += 1;
     handleRef.current?.close();
     handleRef.current = null;
     setActiveTarget(null);

@@ -44,6 +44,9 @@ func Connect(ctx context.Context, conn net.Conn, hostPort, username, password st
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if verifyHostKey == nil {
+		return nil, errors.New("verify host key callback is required")
+	}
 
 	config := &ssh.ClientConfig{
 		User: username,
@@ -114,7 +117,14 @@ func (s *Session) RequestPTY(cols, rows int) error {
 		Width, Height           uint32
 		PixelWidth, PixelHeight uint32
 		Modes                   string
-	}{"xterm-256color", uint32(cols), uint32(rows), 0, 0, ""})
+	}{
+		Term:        "xterm-256color",
+		Width:       uint32(cols),
+		Height:      uint32(rows),
+		PixelWidth:  0,
+		PixelHeight: 0,
+		Modes:       "",
+	})
 
 	ok, err := s.channel.SendRequest("pty-req", true, payload)
 	if err != nil {
@@ -142,7 +152,12 @@ func (s *Session) Resize(cols, rows int) error {
 	payload := ssh.Marshal(struct {
 		Width, Height           uint32
 		PixelWidth, PixelHeight uint32
-	}{uint32(cols), uint32(rows), 0, 0})
+	}{
+		Width:       uint32(cols),
+		Height:      uint32(rows),
+		PixelWidth:  0,
+		PixelHeight: 0,
+	})
 	_, err := s.channel.SendRequest("window-change", false, payload)
 	return err
 }

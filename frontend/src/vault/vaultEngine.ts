@@ -109,7 +109,23 @@ function encodeInput(input: EntryInput): string {
 
 function parseEntries(json: string): SavedEntry[] {
   const parsed: unknown = JSON.parse(json);
-  return Array.isArray(parsed) ? (parsed as SavedEntry[]) : [];
+  if (!Array.isArray(parsed) || !parsed.every(isSavedEntry)) {
+    throw new Error("The vault engine returned malformed entries.");
+  }
+  return parsed;
+}
+
+function isSavedEntry(value: unknown): value is SavedEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.id === "string" &&
+    typeof entry.nickname === "string" &&
+    typeof entry.host === "string" &&
+    Number.isInteger(entry.port) &&
+    (entry.username === undefined || typeof entry.username === "string") &&
+    typeof entry.hasPassword === "boolean"
+  );
 }
 
 // The Go bridge rejects with a plain string, so failures arrive untyped.

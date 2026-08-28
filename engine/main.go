@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"syscall/js"
@@ -73,6 +74,11 @@ func resolvePassword(arg js.Value) (string, error) {
 func validateConnectArgs(args []js.Value) error {
 	if len(args) != 6 {
 		return fmt.Errorf("sshConnect requires 6 arguments")
+	}
+	for i, name := range []string{"relayWsUrl", "host", "port", "username"} {
+		if args[i].Type() != js.TypeString {
+			return fmt.Errorf("%s must be a string", name)
+		}
 	}
 	callbacks := args[5]
 	if callbacks.Type() != js.TypeObject {
@@ -157,6 +163,7 @@ type sessionBridge struct {
 	callbacks js.Value
 
 	closeOnce sync.Once
+	closeErr  error
 	funcs     []js.Func
 }
 
@@ -184,7 +191,11 @@ func (b *sessionBridge) handle() js.Value {
 		if args[0].Type() != js.TypeNumber || args[1].Type() != js.TypeNumber {
 			return "resize requires numeric cols and rows"
 		}
-		if err := b.session.Resize(args[0].Int(), args[1].Int()); err != nil {
+		cols, rows := args[0].Float(), args[1].Float()
+		if !isFiniteInteger(cols) || !isFiniteInteger(rows) {
+			return "resize requires integer cols and rows"
+		}
+		if err := b.session.Resize(int(cols), int(rows)); err != nil {
 			return err.Error()
 		}
 		return nil
@@ -224,17 +235,20 @@ func (b *sessionBridge) read() {
 }
 
 func (b *sessionBridge) close() error {
-	var closeErr error
 	b.closeOnce.Do(func() {
 		b.cancel()
-		closeErr = b.session.Close()
+		b.closeErr = b.session.Close()
 		if _, err := callJS(b.callbacks, "onClose"); err != nil {
-			closeErr = errors.Join(closeErr, err)
+			b.closeErr = errors.Join(b.closeErr, err)
 		}
 		for _, fn := range b.funcs {
 			fn.Release()
 		}
 		b.funcs = nil
 	})
-	return closeErr
+	return b.closeErr
+}
+
+func isFiniteInteger(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value == math.Trunc(value)
 }

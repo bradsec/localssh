@@ -54,6 +54,11 @@ describe("vaultEngine", () => {
     expect(result.entries).toEqual(entries);
   });
 
+  it("rejects malformed entries from the engine boundary", async () => {
+    globals.vaultUnlock.mockResolvedValue(JSON.stringify([{ id: "a", port: "22" }]));
+    await expect(unlockVault("blob-1", "master")).rejects.toThrowError(/malformed entries/i);
+  });
+
   it("maps a wrong password to a typed error", async () => {
     globals.vaultUnlock.mockRejectedValue("vault: wrong master password");
     await expect(unlockVault("blob-1", "nope")).rejects.toBeInstanceOf(WrongPasswordError);

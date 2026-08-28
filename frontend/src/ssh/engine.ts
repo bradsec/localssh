@@ -31,6 +31,9 @@ export async function instantiateEngine(
   response: Response,
   imports: WebAssembly.Imports,
 ): Promise<WebAssembly.Instance> {
+  if (!response.ok) {
+    throw new Error(`Could not load the SSH engine (HTTP ${response.status}).`);
+  }
   const fallbackResponse = response.clone();
   try {
     return (await WebAssembly.instantiateStreaming(response, imports)).instance;
@@ -131,7 +134,11 @@ export async function connectSession(options: ConnectOptions): Promise<SshHandle
   } catch (error) {
     // The Go SSH stack wraps the rejection sentinel during the handshake, so
     // the Promise rejects with a longer string containing this message.
-    if (typeof error === "string" && error.includes("host key rejected")) {
+    if (
+      capturedFingerprint !== "" &&
+      typeof error === "string" &&
+      error.includes("host key rejected")
+    ) {
       throw new HostKeyRejectedError(hostPort, capturedFingerprint);
     }
     throw error;

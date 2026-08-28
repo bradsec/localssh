@@ -115,14 +115,10 @@ func (s *Session) Params() Params {
 // Zero wipes the key. Go's garbage collector may already have copied it, so
 // this reduces exposure rather than eliminating it.
 func (s *Session) Zero() {
-	for i := range s.key {
-		s.key[i] = 0
-	}
+	clear(s.key[:])
 	s.locked = true
 }
 
 func zero(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
+	clear(b)
 }
