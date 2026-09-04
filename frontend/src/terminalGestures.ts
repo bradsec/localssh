@@ -24,6 +24,28 @@ export interface GestureSample {
   verticalHistoryAllowed: boolean;
 }
 
+export interface TerminalCell {
+  column: number;
+  row: number;
+}
+
+/** Converts two buffer cells into the forward range expected by xterm.select. */
+export function selectionSpan(
+  start: TerminalCell,
+  end: TerminalCell,
+  columns: number,
+): { column: number; row: number; length: number } {
+  const startOffset = start.row * columns + start.column;
+  const endOffset = end.row * columns + end.column;
+  const first = startOffset <= endOffset ? start : end;
+
+  return {
+    column: first.column,
+    row: first.row,
+    length: Math.abs(endOffset - startOffset) + 1,
+  };
+}
+
 /** Minimum travel before movement counts as a swipe rather than a tap. */
 const MIN_TRAVEL_PX = 44;
 /** A swipe must be this much longer on its main axis to count as that axis. */

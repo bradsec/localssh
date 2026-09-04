@@ -20,8 +20,9 @@ changing the terminal font updates the remote session geometry so width-aware
 commands format their output correctly.
 
 Touch gestures: swipe right for Tab, swipe left for Esc, flick up or down for
-command history, and pinch to change the font size. Vertical flicks defer to
-xterm's scrollback while you are reading history.
+command history, and long-press then drag to select terminal text. Vertical
+flicks defer to xterm's scrollback while you are reading history. Set the font
+size from the Appearance menu.
 
 ## Development
 

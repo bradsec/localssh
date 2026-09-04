@@ -3,8 +3,31 @@ import {
   classifyGesture,
   gestureToInput,
   isTap,
+  selectionSpan,
   twoFingerScrollLines,
 } from "./terminalGestures.js";
+
+describe("selectionSpan", () => {
+  it("creates a forward selection across terminal rows", () => {
+    expect(selectionSpan({ column: 7, row: 4 }, { column: 3, row: 6 }, 10)).toEqual({
+      column: 7,
+      row: 4,
+      length: 17,
+    });
+  });
+
+  it("normalises a selection dragged backwards", () => {
+    expect(selectionSpan({ column: 3, row: 6 }, { column: 7, row: 4 }, 10)).toEqual({
+      column: 7,
+      row: 4,
+      length: 17,
+    });
+  });
+
+  it("includes both endpoint cells", () => {
+    expect(selectionSpan({ column: 2, row: 1 }, { column: 2, row: 1 }, 10).length).toBe(1);
+  });
+});
 
 const flick = { dt: 120, atBottom: true, verticalHistoryAllowed: true };
 

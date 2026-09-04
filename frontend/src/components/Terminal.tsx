@@ -5,6 +5,8 @@ import {
   classifyGesture,
   gestureToInput,
   isTap,
+  selectionSpan,
+  type TerminalCell,
   twoFingerScrollLines,
 } from "../terminalGestures.js";
 import {
@@ -238,11 +240,49 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   let handled = false;
   let twoFingerY: number | null = null;
   let twoFingerRemainder = 0;
+  let oneFingerY: number | null = null;
+  let oneFingerRemainder = 0;
+  let longPressTimer = 0;
+  let selectionStart: TerminalCell | null = null;
+
+  const cancelLongPress = () => {
+    window.clearTimeout(longPressTimer);
+    longPressTimer = 0;
+  };
+
+  const cellAt = (clientX: number, clientY: number): TerminalCell | null => {
+    const screen = element.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen || screen.clientWidth <= 0 || screen.clientHeight <= 0) return null;
+    const bounds = screen.getBoundingClientRect();
+    const column = Math.max(
+      0,
+      Math.min(
+        targets.term.cols - 1,
+        Math.floor(((clientX - bounds.left) / bounds.width) * targets.term.cols),
+      ),
+    );
+    const viewportRow = Math.max(
+      0,
+      Math.min(
+        targets.term.rows - 1,
+        Math.floor(((clientY - bounds.top) / bounds.height) * targets.term.rows),
+      ),
+    );
+    return { column, row: targets.term.buffer.active.viewportY + viewportRow };
+  };
+
+  const updateSelection = (clientX: number, clientY: number) => {
+    if (!selectionStart) return;
+    const end = cellAt(clientX, clientY);
+    if (end) {
+      const span = selectionSpan(selectionStart, end, targets.term.cols);
+      targets.term.select(span.column, span.row, span.length);
+    }
+  };
 
   // Recognises the swipe from the movement so far rather than waiting for the
-  // release. On iOS the browser owns the vertical pan (touch-action: pan-y) and
-  // dispatches pointercancel the instant it starts scrolling xterm's viewport,
-  // which used to abort the history flick before pointerup could classify it.
+  // release. This lets a history flick win before the same movement becomes
+  // manual scrollback below.
   const recogniseInFlight = (event: PointerEvent) => {
     if (multiTouch || handled || !start || active.size !== 1) return;
     const gesture = classifyGesture({
@@ -278,10 +318,25 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       };
       multiTouch = false;
       handled = false;
+      selectionStart = null;
+      oneFingerY = event.clientY;
+      oneFingerRemainder = 0;
+      cancelLongPress();
+      const longPressX = event.clientX;
+      const longPressY = event.clientY;
+      longPressTimer = window.setTimeout(() => {
+        selectionStart = cellAt(longPressX, longPressY);
+        if (!selectionStart) return;
+        handled = true;
+        targets.term.blur();
+        targets.term.select(selectionStart.column, selectionStart.row, 1);
+      }, 500);
     } else {
       // A second finger explicitly drives scrollback, never shell input.
       start = null;
       multiTouch = true;
+      cancelLongPress();
+      selectionStart = null;
       if (active.size === 2) {
         twoFingerY = activeCentroidY();
         twoFingerRemainder = 0;
@@ -292,7 +347,36 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   const onPointerMove = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (selectionStart) {
+      updateSelection(event.clientX, event.clientY);
+      event.preventDefault();
+      return;
+    }
+
+    if (start && !isTap({ dx: event.clientX - start.x, dy: event.clientY - start.y })) {
+      cancelLongPress();
+    }
     recogniseInFlight(event);
+    if (!multiTouch && active.size === 1 && oneFingerY !== null && !handled && start) {
+      oneFingerRemainder += event.clientY - oneFingerY;
+      oneFingerY = event.clientY;
+      const canScrollNow =
+        !isViewportAtBottom(targets.term) ||
+        !start.verticalHistoryAllowed ||
+        Math.abs(event.clientY - start.y) >= 44 ||
+        event.timeStamp - start.at > 450;
+      if (canScrollNow) {
+        const rowHeight = element.clientHeight / targets.term.rows;
+        const lines = twoFingerScrollLines(oneFingerRemainder, rowHeight);
+        if (lines !== 0) {
+          targets.term.scrollLines(lines);
+          oneFingerRemainder += lines * rowHeight;
+        }
+      }
+      event.preventDefault();
+      return;
+    }
     if (!multiTouch || active.size !== 2 || twoFingerY === null) return;
 
     const nextY = activeCentroidY();
@@ -310,6 +394,17 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   const onPointerEnd = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.delete(event.pointerId);
+    cancelLongPress();
+
+    if (selectionStart) {
+      updateSelection(event.clientX, event.clientY);
+      selectionStart = null;
+      start = null;
+      handled = false;
+      oneFingerY = null;
+      oneFingerRemainder = 0;
+      return;
+    }
 
     if (multiTouch) {
       if (active.size < 2) {
@@ -354,6 +449,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   element.addEventListener("pointercancel", onPointerEnd);
 
   return () => {
+    cancelLongPress();
     element.removeEventListener("pointerdown", onPointerDown);
     element.removeEventListener("pointermove", onPointerMove);
     element.removeEventListener("pointerup", onPointerEnd);

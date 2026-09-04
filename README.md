@@ -383,6 +383,7 @@ For devices with no physical Tab or arrow keys:
 | Swipe right        | Tab              |
 | Swipe left         | Esc              |
 | Flick up or down   | Command history  |
+| Long press and drag | Select terminal text |
 
 The gesture is recognised from the movement itself, not the release, so it still
 lands on iPadOS, where Safari cancels the touch as soon as it starts scrolling.
@@ -392,8 +393,10 @@ fingers scrolls the output.
 
 ### Clipboard
 
-A touch browser gives no way to copy from or paste into the terminal surface
-without a hardware keyboard, so a **Clipboard** menu sits in the session toolbar:
+Long-press terminal output and drag to select it. Because xterm renders to a
+canvas, Safari cannot show its native text-selection handles; localssh draws the
+selection in the terminal instead. A **Clipboard** menu sits in the session
+toolbar for copying that selection and for pasting without a hardware keyboard:
 
 | Control                | Action                                                     |
 | ---------------------- | ---------------------------------------------------------- |

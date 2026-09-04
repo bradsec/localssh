@@ -335,16 +335,16 @@ h2 {
   overflow: hidden;
 }
 
-/* pan-y leaves vertical scrolling to xterm's viewport and reserves horizontal
-   swipes for the gesture handler in Terminal.tsx. It also keeps a pinch from
-   zooming the page over the terminal, where a zoomed viewport hides the prompt
-   and reflows nothing; font size belongs to the Appearance panel. */
+/* Terminal.tsx owns touch movement so a long press can become an xterm
+   selection without Safari cancelling the pointer stream as a page pan. It
+   preserves one- and two-finger scrollback itself and keeps pinch zoom from
+   hiding the prompt; font size belongs to the Appearance panel. */
 .terminal {
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 /* The hidden textarea is where xterm receives keystrokes, so it is the element
