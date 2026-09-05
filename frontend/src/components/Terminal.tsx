@@ -305,6 +305,12 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
 
   const onPointerDown = (event: PointerEvent) => {
     if (event.pointerType === "mouse") return;
+
+    // Keep Safari from turning the long press into page movement or its native
+    // callout. Capturing also keeps the drag alive when a thumb strays outside
+    // the terminal before it is released.
+    event.preventDefault();
+    element.setPointerCapture?.(event.pointerId);
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (active.size === 1) {
@@ -394,6 +400,9 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   const onPointerEnd = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.delete(event.pointerId);
+    if (element.hasPointerCapture?.(event.pointerId)) {
+      element.releasePointerCapture(event.pointerId);
+    }
     cancelLongPress();
 
     if (selectionStart) {
