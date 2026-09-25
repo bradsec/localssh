@@ -112,6 +112,35 @@ describe("local relay", () => {
     wss.close();
   });
 
+  it("refuses a long disallowed host without exceeding the close reason limit", async () => {
+    const wss = startLocalRelay({
+      port: 0,
+      log: () => {},
+      accessConfig: parseAccessConfig({
+        ALLOWED_ORIGINS: "http://localhost:8080",
+        ALLOWED_HOSTS: "ssh.example.com",
+      }),
+    });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`, {
+      origin: "http://localhost:8080",
+    });
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+      client.once("close", (code, reason) => resolve({ code, reason: reason.toString() })),
+    );
+    // A valid host name may run to 253 characters, far past the 123 bytes a
+    // WebSocket close reason can carry.
+    client.send(encodeConnectFrame({ host: `${"a".repeat(240)}.example`, port: 22 }));
+
+    const { code, reason } = await closed;
+    expect(code).toBe(1008);
+    expect(Buffer.byteLength(reason)).toBeLessThanOrEqual(123);
+    await closeLocalRelay(wss);
+  });
+
   it("logs a rejected origin so the operator can see the misconfiguration", async () => {
     const log = vi.fn();
     const wss = startLocalRelay({

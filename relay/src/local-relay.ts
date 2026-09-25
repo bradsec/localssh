@@ -177,7 +177,10 @@ export function startLocalRelay({
           `refused target ${frame.host}:${frame.port} from ${origin}: ${message}. ` +
             "Add the host to ALLOWED_HOSTS and the port to ALLOWED_PORTS to permit it.",
         );
-        ws.close(1008, message);
+        // The detail, which echoes the client's host, stays in the log: a close
+        // reason is limited to 123 bytes and ws throws past that, which a
+        // 253-character host name would reach.
+        ws.close(1008, "target not allowed");
         return;
       }
 
