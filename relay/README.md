@@ -35,7 +35,8 @@ any host and port through it.
 | `TARGET_CONNECT_TIMEOUT_MS` | no | Target TCP connection deadline in milliseconds. Defaults to `10000`. |
 
 A rejected upgrade returns `403`. A target rejected after the connect frame
-closes the socket with code `1008`.
+closes the socket with code `1008` and the reason `target not allowed`; the
+relay log names the rejected host and port.
 
 ## Flow control
 

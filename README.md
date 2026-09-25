@@ -407,6 +407,9 @@ toolbar for copying that selection and for pasting without a hardware keyboard:
 A dot on the menu marks when the terminal has a selection ready to copy, and
 turns green once that selection has been copied.
 
+The selection stays in place when the on-screen keyboard opens or closes, which
+happens on the way to the Clipboard menu. Typing into the session clears it.
+
 ## Development
 
 Development from source requires Go 1.27 or newer and Node.js 24 or newer.
