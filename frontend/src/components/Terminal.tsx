@@ -15,6 +15,7 @@ import {
   isSmallScreenIOS,
   type IOSDevice,
 } from "../terminalFont.js";
+import { resizeKeepingSelection } from "../terminalSelection.js";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalControls {
@@ -68,6 +69,14 @@ export function Terminal({
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
 
+  // xterm does not announce a selection restored after a resize, because its
+  // change detection never saw the resize clear it, so the state is reported
+  // directly after every fit.
+  const fitKeepingSelection = (term: XTerm, fit: FitAddon) => {
+    resizeKeepingSelection(term, () => fit.fit());
+    onSelectionChangeRef.current?.(term.hasSelection());
+  };
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -117,7 +126,7 @@ export function Terminal({
       cancelAnimationFrame(animationFrame);
       animationFrame = requestAnimationFrame(() => {
         if (containerRef.current?.clientWidth && containerRef.current.clientHeight) {
-          fit.fit();
+          fitKeepingSelection(term, fit);
         }
       });
     };
@@ -160,9 +169,11 @@ export function Terminal({
     const device = currentIOSDevice();
 
     const fitAndRefresh = () => {
-      fitRef.current?.fit();
       const currentTerm = termRef.current;
-      if (currentTerm) currentTerm.refresh(0, currentTerm.rows - 1);
+      const currentFit = fitRef.current;
+      if (!currentTerm || !currentFit) return;
+      fitKeepingSelection(currentTerm, currentFit);
+      currentTerm.refresh(0, currentTerm.rows - 1);
     };
 
     let cancelRestore = () => {};
