@@ -125,7 +125,10 @@ func Dial(ctx context.Context, wsURL, host, port string) (*Conn, error) {
 		if len(buf) > maxBufferedReadBytes-c.bufferedReadBytes {
 			c.queueMu.Unlock()
 			c.signalClosed()
-			c.ws.Call("close", 1009, "receive buffer limit exceeded")
+			// A page may only close with 1000 or 3000..4999; any other code,
+			// including 1009 "message too big", makes the browser throw, and a
+			// throw here panics the whole engine. 4009 mirrors 1009.
+			c.ws.Call("close", 4009, "receive buffer limit exceeded")
 			return nil
 		}
 		c.queue = append(c.queue, buf)
