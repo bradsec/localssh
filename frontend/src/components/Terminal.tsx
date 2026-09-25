@@ -207,7 +207,7 @@ export function Terminal({
 
   return (
     <div
-      className="terminal"
+      className="terminal-host"
       ref={containerRef}
       style={
         {
