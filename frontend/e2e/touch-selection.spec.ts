@@ -22,13 +22,9 @@ interface Point {
   y: number;
 }
 
-test("a touch selection survives the keyboard closing and can be copied", async ({
-  page,
-  context,
-}) => {
+async function connect(page: Page) {
   const sshdAddress = process.env.E2E_SSHD_ADDR;
   expect(sshdAddress, "global setup must provide the SSH server address").toBeTruthy();
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 
   const separator = sshdAddress!.lastIndexOf(":");
   await page.goto("/");
@@ -39,6 +35,14 @@ test("a touch selection survives the keyboard closing and can be copied", async 
   await page.getByRole("button", { name: /^Connect$/i }).tap();
   await page.getByRole("button", { name: /trust and connect/i }).tap();
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+}
+
+test("a touch selection survives the keyboard closing and can be copied", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await connect(page);
 
   await page.keyboard.type("selectme");
   await expect(page.locator(".xterm-rows")).toContainText("selectme", { timeout: 5_000 });
@@ -64,4 +68,23 @@ test("a touch selection survives the keyboard closing and can be copied", async 
   await page.getByRole("button", { name: /^copy selection$/i }).tap();
   await expect(page.getByText("Copied the selection.")).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("selectme");
+});
+
+test("a touch the browser cancels is not taken as a tap", async ({ page }) => {
+  await connect(page);
+  const terminalInput = page.locator(".xterm-helper-textarea");
+  await terminalInput.blur();
+  await expect(terminalInput).not.toBeFocused();
+
+  const screen = (await page.locator(".xterm-screen").boundingBox())!;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: screen.x + 20, y: screen.y + 20 }],
+  });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  await cdp.detach();
+
+  await page.waitForTimeout(300);
+  await expect(terminalInput).not.toBeFocused();
 });

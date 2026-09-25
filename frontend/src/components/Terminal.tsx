@@ -416,6 +416,24 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     }
     cancelLongPress();
 
+    // The browser took the touch over, so it completes nothing: no swipe, tap,
+    // or selection change comes from where it happened to stop.
+    if (event.type === "pointercancel") {
+      selectionStart = null;
+      start = null;
+      oneFingerY = null;
+      oneFingerRemainder = 0;
+      if (active.size < 2) {
+        twoFingerY = null;
+        twoFingerRemainder = 0;
+      }
+      if (active.size === 0) {
+        multiTouch = false;
+        handled = false;
+      }
+      return;
+    }
+
     if (selectionStart) {
       updateSelection(event.clientX, event.clientY);
       selectionStart = null;
