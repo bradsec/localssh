@@ -50,6 +50,9 @@ function copyViaExecCommand(text: string): boolean {
   const preserved = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 
   staging.select();
+  // iOS Safari ignores select() on a field that is not being edited; an
+  // explicit range is what gives execCommand a selection to copy there.
+  staging.setSelectionRange(0, text.length);
   let ok = false;
   try {
     ok = document.execCommand("copy");
