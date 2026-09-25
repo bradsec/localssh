@@ -187,7 +187,11 @@ func validateTerminalSize(cols, rows int) error {
 // Write sends bytes to the remote shell's stdin.
 func (s *Session) Write(p []byte) (int, error) { return s.channel.Write(p) }
 
-// Read reads bytes from the remote shell's stdout/stderr.
+// Read reads the remote PTY output. RequestPTY must precede Read: a PTY shell
+// attaches stdout and stderr to the same terminal, so both arrive as normal
+// channel data. Separate SSH extended-data stderr is intentionally not read.
+// Servers that send it even after accepting a PTY are unsupported and can
+// stall when unread extended data exhausts the shared channel window.
 func (s *Session) Read(p []byte) (int, error) { return s.channel.Read(p) }
 
 func (s *Session) Close() error {
