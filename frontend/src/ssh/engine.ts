@@ -1,5 +1,5 @@
 export interface SshHandle {
-  write(chunk: Uint8Array): void;
+  write(chunk: Uint8Array): string | null;
   resize(cols: number, rows: number): void;
   close(): void;
 }

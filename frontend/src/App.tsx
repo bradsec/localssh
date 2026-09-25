@@ -48,7 +48,7 @@ type Status =
       previousFingerprint?: string;
       pending: ConnectFormValues;
     }
-  | { kind: "connected" }
+  | { kind: "connected"; inputError?: string }
   | { kind: "error"; message: string };
 
 export function App() {
@@ -78,7 +78,14 @@ export function App() {
     (data: string) => {
       const { data: outgoing, next } = applyModifiers(data, modifiersRef.current);
       updateModifiers(next);
-      handleRef.current?.write(ENCODER.encode(outgoing));
+      const error = handleRef.current?.write(ENCODER.encode(outgoing));
+      if (error) {
+        setStatus((current) =>
+          current.kind === "connected"
+            ? { ...current, inputError: `Input was not sent: ${error}` }
+            : current,
+        );
+      }
     },
     [updateModifiers],
   );
@@ -279,6 +286,11 @@ export function App() {
         {status.kind === "error" && (
           <p className="connection-error" role="alert">
             {status.message}
+          </p>
+        )}
+        {status.kind === "connected" && status.inputError && (
+          <p className="connection-error" role="alert">
+            {status.inputError}
           </p>
         )}
         <div className="terminal-frame" aria-label="SSH terminal">

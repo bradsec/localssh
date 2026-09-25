@@ -203,6 +203,28 @@ describe("App", () => {
     expect(terminalActive).toBe(true);
   });
 
+  it("shows rejected input without dropping the active connection", async () => {
+    const handle: engine.SshHandle = {
+      write: vi.fn().mockReturnValue("write queue full"),
+      resize: vi.fn(),
+      close: vi.fn(),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.9");
+
+    act(() => terminalInput?.("paste"));
+    expect(screen.getByRole("alert")).toHaveTextContent("write queue full");
+    expect(screen.getByRole("alert")).toHaveTextContent(/input was not sent/i);
+    expect(screen.getByRole("button", { name: /disconnect/i })).toBeVisible();
+    expect(terminalActive).toBe(true);
+    expect(handle.close).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /disconnect/i }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("clears the terminal when the session is disconnected", async () => {
     const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
     vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
