@@ -88,3 +88,40 @@ test("a wrong master password does not unlock the vault", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText(/not correct/i, { timeout: 15_000 });
   await expect(page.getByRole("button", { name: /^unlock$/i })).toBeVisible();
 });
+
+test("a stale tab cannot overwrite a host saved in another tab", async ({ page, context }) => {
+  await page.goto("/");
+  await page.getByLabel(/^master password$/i).fill(MASTER_PASSWORD);
+  await page.getByLabel(/confirm master password/i).fill(MASTER_PASSWORD);
+  await page.getByRole("button", { name: /create/i }).click();
+  await expect(page.getByText(/no saved hosts yet/i)).toBeVisible({ timeout: 15_000 });
+
+  const other = await context.newPage();
+  await other.goto("/");
+  await other.getByLabel(/^master password$/i).fill(MASTER_PASSWORD);
+  await other.getByRole("button", { name: /^unlock$/i }).click();
+  await expect(other.getByText(/no saved hosts yet/i)).toBeVisible({ timeout: 15_000 });
+
+  for (const [tab, nickname] of [
+    [page, "first host"],
+    [other, "stale host"],
+  ] as const) {
+    await tab.getByRole("button", { name: /add current/i }).click();
+    const savedHosts = tab.getByRole("region", { name: /saved hosts/i });
+    await savedHosts.getByLabel(/nickname/i).fill(nickname);
+    await savedHosts.getByLabel(/^host$/i).fill("example.com");
+    await savedHosts.getByRole("button", { name: /^save$/i }).click();
+    if (tab === page) {
+      await expect(page.getByRole("button", { name: /^first host:/i })).toBeVisible();
+    }
+  }
+  await expect(other.getByRole("alert")).toContainText(/reload.*unlock again/i);
+  await expect(other.getByRole("button", { name: /^unlock$/i })).toBeVisible();
+  await other.reload();
+  await other.getByLabel(/^master password$/i).fill(MASTER_PASSWORD);
+  await other.getByRole("button", { name: /^unlock$/i }).click();
+  await expect(other.getByRole("button", { name: /^first host:/i })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(other.getByRole("button", { name: /^stale host:/i })).toHaveCount(0);
+});

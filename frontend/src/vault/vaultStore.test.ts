@@ -1,3 +1,4 @@
+import { openDB } from "idb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   VAULT_STORAGE_KEY,
@@ -23,19 +24,69 @@ describe("vaultStore", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
+  it("saves while an older tab holds the known-host database open", async () => {
+    const legacy = await openDB("localssh", 2, {
+      upgrade(db) {
+        db.createObjectStore("knownHosts", { keyPath: "hostPort" });
+      },
+    });
+    const blocked = new Promise((resolve) => {
+      legacy.addEventListener("versionchange", () => resolve("blocked"), { once: true });
+    });
+    const save = saveVaultBlob(validBlob, null);
+    try {
+      const outcome = await Promise.race([save.then(() => "saved"), blocked]);
+      expect(outcome).toBe("saved");
+    } finally {
+      legacy.close();
+      await save;
+    }
+  });
+
   it("reports no vault when nothing is stored", () => {
     expect(loadVaultBlob()).toBeNull();
     expect(hasVaultBlob()).toBe(false);
   });
 
-  it("round-trips a well-formed envelope", () => {
-    saveVaultBlob(validBlob);
+  it("round-trips a well-formed envelope", async () => {
+    await saveVaultBlob(validBlob, null);
     expect(loadVaultBlob()).toBe(validBlob);
   });
 
-  it("uses exactly one storage key", () => {
-    saveVaultBlob(validBlob);
+  it("uses exactly one storage key", async () => {
+    await saveVaultBlob(validBlob, null);
     expect(Object.keys(localStorage)).toEqual([VAULT_STORAGE_KEY]);
+  });
+
+  it("rejects a stale save after another tab changes the password", async () => {
+    localStorage.setItem(VAULT_STORAGE_KEY, validBlob);
+    const rekeyed = JSON.stringify({ ...JSON.parse(validBlob), ct: "new-password" });
+    await saveVaultBlob(rekeyed, validBlob);
+    await expect(saveVaultBlob(validBlob, validBlob)).rejects.toThrow(/changed.*unlock again/i);
+    expect(loadVaultBlob()).toBe(rekeyed);
+  });
+
+  it("allows only one simultaneous writer for the same loaded blob", async () => {
+    localStorage.setItem(VAULT_STORAGE_KEY, validBlob);
+    const first = JSON.stringify({ ...JSON.parse(validBlob), ct: "first" });
+    const second = JSON.stringify({ ...JSON.parse(validBlob), ct: "second" });
+    const results = await Promise.allSettled([
+      saveVaultBlob(first, validBlob),
+      saveVaultBlob(second, validBlob),
+    ]);
+    expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
+    expect(loadVaultBlob()).toBe(first);
+  });
+
+  it("refuses creation over an existing vault", async () => {
+    localStorage.setItem(VAULT_STORAGE_KEY, validBlob);
+    await expect(saveVaultBlob("replacement", null)).rejects.toThrow(/changed/i);
+    expect(loadVaultBlob()).toBe(validBlob);
+  });
+
+  it("does not recreate a vault another tab deleted", async () => {
+    await expect(saveVaultBlob(validBlob, validBlob)).rejects.toThrow(/changed/i);
+    expect(hasVaultBlob()).toBe(false);
   });
 
   // A corrupt value must not be handed to the engine, and must not be silently
@@ -58,9 +109,9 @@ describe("vaultStore", () => {
     expect(() => loadVaultBlob()).toThrowError(/corrupt or.*unsupported/i);
   });
 
-  it("clears the stored vault", () => {
-    saveVaultBlob(validBlob);
-    clearVaultBlob();
+  it("clears the stored vault", async () => {
+    await saveVaultBlob(validBlob, null);
+    await clearVaultBlob();
     expect(localStorage.getItem(VAULT_STORAGE_KEY)).toBeNull();
   });
 
@@ -73,7 +124,7 @@ describe("vaultStore", () => {
 
   // Reads degrade safely. Failed writes and deletion must be reported because
   // pretending either succeeded would put UI state ahead of storage.
-  it("survives a throwing localStorage", () => {
+  it("survives a throwing localStorage", async () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new DOMException("blocked", "SecurityError");
     });
@@ -87,14 +138,14 @@ describe("vaultStore", () => {
     expect(() => loadVaultBlob()).not.toThrow();
     expect(loadVaultBlob()).toBeNull();
     expect(hasVaultBlob()).toBe(false);
-    expect(() => saveVaultBlob(validBlob)).toThrowError(/storage is unavailable/i);
-    expect(() => clearVaultBlob()).toThrowError(/storage is unavailable/i);
+    await expect(saveVaultBlob(validBlob, null)).rejects.toThrowError(/storage is unavailable/i);
+    await expect(clearVaultBlob()).rejects.toThrowError(/storage is unavailable/i);
   });
 
-  it("throws a typed error when the quota is exceeded", () => {
+  it("throws a typed error when the quota is exceeded", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("quota", "QuotaExceededError");
     });
-    expect(() => saveVaultBlob(validBlob)).toThrowError(/storage is full/i);
+    await expect(saveVaultBlob(validBlob, null)).rejects.toThrowError(/storage is full/i);
   });
 });

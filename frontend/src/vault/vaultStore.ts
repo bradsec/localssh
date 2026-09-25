@@ -1,3 +1,5 @@
+import { openDB, type IDBPDatabase } from "idb";
+
 // The one persisted artefact of the address book: a sealed envelope under a
 // single localStorage key. Nothing here can read the vault; the shape check
 // exists only so that junk never reaches the engine.
@@ -6,6 +8,8 @@ export const VAULT_STORAGE_KEY = "vault";
 
 /** The envelope version this build understands. Mirrors envelopeVersion in Go. */
 const SUPPORTED_VERSION = 1;
+
+let writeDB: Promise<IDBPDatabase> | null = null;
 
 export class StorageFullError extends Error {
   constructor() {
@@ -59,19 +63,41 @@ export function hasVaultBlob(): boolean {
   }
 }
 
-export function saveVaultBlob(blob: string): void {
-  try {
-    localStorage.setItem(VAULT_STORAGE_KEY, blob);
-  } catch (error) {
-    if (isQuotaError(error)) throw new StorageFullError();
-    throw new StorageUnavailableError();
+export class StaleVaultError extends Error {
+  constructor() {
+    super("The vault changed in another tab. Reload this page and unlock again before saving.");
+    this.name = "StaleVaultError";
   }
 }
 
-export function clearVaultBlob(): void {
+export async function saveVaultBlob(blob: string, expected: string | null): Promise<void> {
+  await withVaultLock(() => {
+    if (localStorage.getItem(VAULT_STORAGE_KEY) !== expected) throw new StaleVaultError();
+    localStorage.setItem(VAULT_STORAGE_KEY, blob);
+  });
+}
+
+export async function clearVaultBlob(): Promise<void> {
+  await withVaultLock(() => localStorage.removeItem(VAULT_STORAGE_KEY));
+}
+
+async function withVaultLock(action: () => void): Promise<void> {
   try {
-    localStorage.removeItem(VAULT_STORAGE_KEY);
-  } catch {
+    // Keep this separate so an older tab's known-host connection cannot
+    // block vault writes by holding an earlier database schema open.
+    writeDB ??= openDB("localssh-vault-writes", 1, {
+      upgrade(db) {
+        db.createObjectStore("vaultWrites");
+      },
+    });
+    const db = await writeDB;
+    const transaction = db.transaction("vaultWrites", "readwrite");
+    // A request runs only once this transaction owns the store. Keep the
+    // localStorage comparison and mutation synchronous while it holds the lock.
+    await Promise.all([transaction.store.get("lock").then(action), transaction.done]);
+  } catch (error) {
+    if (error instanceof StaleVaultError) throw error;
+    if (isQuotaError(error)) throw new StorageFullError();
     throw new StorageUnavailableError();
   }
 }

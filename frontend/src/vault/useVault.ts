@@ -50,6 +50,7 @@ export function useVault(): VaultApi {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const actionInFlight = useRef(false);
+  const loadedBlob = useRef<string | null>(null);
 
   // Every action funnels through here so that no rejection reaches a component
   // and the busy flag can never be left stuck on.
@@ -75,7 +76,8 @@ export function useVault(): VaultApi {
 
   const persist = useCallback(async (blob: string): Promise<void> => {
     try {
-      saveVaultBlob(blob);
+      await saveVaultBlob(blob, loadedBlob.current);
+      loadedBlob.current = blob;
     } catch (failure) {
       // The engine mutation has happened but storage has not. Fail closed so
       // no later action can build on state that a reload would lose.
@@ -89,6 +91,7 @@ export function useVault(): VaultApi {
   const create = useCallback(
     (masterPassword: string) =>
       run(async () => {
+        loadedBlob.current = null;
         const blob = await createVault(masterPassword);
         await persist(blob);
         setEntries([]);
@@ -106,6 +109,7 @@ export function useVault(): VaultApi {
           throw new Error("There is no saved vault in this browser.");
         }
         const opened = await unlockVault(blob, masterPassword);
+        loadedBlob.current = blob;
         setEntries(opened.entries);
         setStatus("unlocked");
       }),
@@ -156,8 +160,10 @@ export function useVault(): VaultApi {
     () =>
       run(async () => {
         await lockVault();
-        clearVaultBlob();
         setEntries([]);
+        setStatus("locked");
+        await clearVaultBlob();
+        loadedBlob.current = null;
         setStatus("absent");
       }),
     [run],

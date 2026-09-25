@@ -41,8 +41,8 @@ beforeEach(() => {
   vi.mocked(store.isStorageAvailable).mockReturnValue(true);
   vi.mocked(store.hasVaultBlob).mockReturnValue(false);
   vi.mocked(store.loadVaultBlob).mockReturnValue(null);
-  vi.mocked(store.saveVaultBlob).mockImplementation(() => {});
-  vi.mocked(store.clearVaultBlob).mockImplementation(() => {});
+  vi.mocked(store.saveVaultBlob).mockResolvedValue(undefined);
+  vi.mocked(store.clearVaultBlob).mockResolvedValue(undefined);
   vi.mocked(engine.createVault).mockResolvedValue("blob-1");
   vi.mocked(engine.unlockVault).mockResolvedValue({ blob: "blob-1", entries });
   vi.mocked(engine.upsertEntry).mockResolvedValue({ blob: "blob-2", entries });
@@ -94,7 +94,7 @@ describe("useVault", () => {
       await result.current.create("master password");
     });
 
-    expect(store.saveVaultBlob).toHaveBeenCalledWith("blob-1");
+    expect(store.saveVaultBlob).toHaveBeenCalledWith("blob-1", null);
     expect(result.current.status).toBe("unlocked");
     expect(result.current.entries).toEqual([]);
   });
@@ -146,7 +146,7 @@ describe("useVault", () => {
       });
     });
 
-    expect(store.saveVaultBlob).toHaveBeenCalledWith("blob-2");
+    expect(store.saveVaultBlob).toHaveBeenCalledWith("blob-2", "blob-1");
     expect(result.current.entries).toEqual(entries);
   });
 
@@ -178,6 +178,36 @@ describe("useVault", () => {
     expect(engine.lockVault).toHaveBeenCalled();
     expect(result.current.status).toBe("locked");
     expect(result.current.entries).toEqual([]);
+  });
+
+  it("locks and reports an asynchronous stale write failure", async () => {
+    vi.mocked(store.hasVaultBlob).mockReturnValue(true);
+    vi.mocked(store.loadVaultBlob).mockReturnValue("blob-1");
+    const { result } = renderHook(() => useVault());
+    await act(async () => {
+      await result.current.unlock("master password");
+    });
+    vi.mocked(store.saveVaultBlob).mockRejectedValue(new store.StaleVaultError());
+    await act(async () => {
+      expect(await result.current.changePassword("old", "new")).toBe(false);
+    });
+    expect(result.current.status).toBe("locked");
+    expect(result.current.entries).toEqual([]);
+    expect(result.current.error).toMatch(/reload.*unlock again/i);
+  });
+
+  it("uses the last successful save as the next write baseline", async () => {
+    const { result } = renderHook(() => useVault());
+    await act(async () => {
+      await result.current.create("master password");
+    });
+    await act(async () => {
+      await result.current.remove("a");
+    });
+    await act(async () => {
+      await result.current.changePassword("old", "new");
+    });
+    expect(store.saveVaultBlob).toHaveBeenLastCalledWith("blob-4", "blob-3");
   });
 
   it("removes an entry", async () => {
@@ -227,6 +257,33 @@ describe("useVault", () => {
     expect(store.clearVaultBlob).toHaveBeenCalled();
     expect(result.current.status).toBe("absent");
     expect(result.current.entries).toEqual([]);
+  });
+
+  it("stays locked with cleared entries when deleting storage fails", async () => {
+    vi.mocked(store.hasVaultBlob).mockReturnValue(true);
+    vi.mocked(store.loadVaultBlob).mockReturnValue("blob-1");
+    const { result } = renderHook(() => useVault());
+    await act(async () => {
+      await result.current.unlock("master password");
+    });
+    let rejectDelete: (error: Error) => void = () => {};
+    vi.mocked(store.clearVaultBlob).mockReturnValue(
+      new Promise((_, reject) => {
+        rejectDelete = reject;
+      }),
+    );
+    let pending: Promise<boolean>;
+    await act(async () => {
+      pending = result.current.reset();
+    });
+    expect(result.current.status).toBe("locked");
+    expect(result.current.entries).toEqual([]);
+    await act(async () => {
+      rejectDelete(new store.StorageUnavailableError());
+      expect(await pending).toBe(false);
+    });
+    expect(result.current.status).toBe("locked");
+    expect(result.current.error).toMatch(/storage is unavailable/i);
   });
 
   it("marks itself busy while a slow derivation runs", async () => {
