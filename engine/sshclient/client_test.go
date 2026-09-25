@@ -37,7 +37,7 @@ func TestConnectAuthAndEcho(t *testing.T) {
 		t.Fatal("expected a host key fingerprint to be reported")
 	}
 
-	if err := session.RequestPTY(80, 24); err != nil {
+	if err := session.RequestPTY(t.Context(), 80, 24); err != nil {
 		t.Fatalf("request pty: %v", err)
 	}
 
@@ -207,5 +207,39 @@ func TestConnectTimesOutOnSilentPeer(t *testing.T) {
 	case silent := <-accepted:
 		silent.Close()
 	default:
+	}
+}
+
+func TestRequestPTYGivesUpWhenTheServerNeverReplies(t *testing.T) {
+	server, err := NewTestServer("tester", "s3cret")
+	if err != nil {
+		t.Fatalf("start test server: %v", err)
+	}
+	defer server.Close()
+	server.WithholdRequestReplies.Store(true)
+
+	conn, err := net.DialTimeout("tcp", server.Addr, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	accept := func(string, HostKeyFingerprint) error { return nil }
+	session, err := Connect(t.Context(), conn, server.Addr, "tester", "s3cret", accept)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- session.RequestPTY(ctx, 80, 24) }()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("RequestPTY = %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RequestPTY waited past its deadline for a reply that never came")
 	}
 }

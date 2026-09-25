@@ -108,10 +108,22 @@ func Connect(ctx context.Context, conn net.Conn, hostPort, username, password st
 
 // RequestPTY asks the remote to allocate a pseudo-terminal of the given
 // size and requests a shell on it. Call once, before Write/Read.
-func (s *Session) RequestPTY(cols, rows int) error {
+//
+// Both requests wait for the server's reply, so ctx bounds them: when it ends
+// first, the connection is closed and ctx's error is returned.
+func (s *Session) RequestPTY(ctx context.Context, cols, rows int) error {
 	if err := validateTerminalSize(cols, rows); err != nil {
 		return err
 	}
+	stop := context.AfterFunc(ctx, func() { _ = s.conn.Close() })
+	err := s.requestPTY(cols, rows)
+	if !stop() {
+		return ctx.Err()
+	}
+	return err
+}
+
+func (s *Session) requestPTY(cols, rows int) error {
 	payload := ssh.Marshal(struct {
 		Term                    string
 		Width, Height           uint32

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net"
+	"sync/atomic"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -15,6 +16,9 @@ import (
 // wire behavior without depending on an external sshd binary or container.
 type TestServer struct {
 	Addr string
+	// WithholdRequestReplies makes sessions ignore channel requests, like a
+	// server that stalls after authentication.
+	WithholdRequestReplies atomic.Bool
 
 	listener net.Listener
 	config   *ssh.ServerConfig
@@ -81,6 +85,13 @@ func (s *TestServer) handleConn(netConn net.Conn) {
 		}
 		channel, requests, err := newChan.Accept()
 		if err != nil {
+			continue
+		}
+		if s.WithholdRequestReplies.Load() {
+			go func() {
+				for range requests {
+				}
+			}()
 			continue
 		}
 		go handleSession(channel, requests)

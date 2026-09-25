@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"engine/sshclient"
+	"engine/writequeue"
 	"engine/wsconn"
 )
 
@@ -97,6 +98,11 @@ func validateConnectArgs(args []js.Value) error {
 // stuck on "Connecting" with no way back except a page reload.
 const connectTimeout = 30 * time.Second
 
+// maxQueuedInputBytes bounds typed or pasted input waiting for the remote
+// window to open, so a stalled server cannot grow the page's memory without
+// limit.
+const maxQueuedInputBytes = 8 << 20
+
 func connect(relayWsURL, host, port, username, password string, callbacks, resolve, reject js.Value) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 
@@ -125,7 +131,7 @@ func connect(relayWsURL, host, port, username, password string, callbacks, resol
 		return
 	}
 
-	if err := session.RequestPTY(80, 24); err != nil {
+	if err := session.RequestPTY(ctx, 80, 24); err != nil {
 		cancel()
 		rejectWithCleanup(reject, err, session.Close())
 		return
@@ -136,6 +142,7 @@ func connect(relayWsURL, host, port, username, password string, callbacks, resol
 		session:   session,
 		callbacks: callbacks,
 	}
+	bridge.writes = writequeue.New(session, maxQueuedInputBytes, func(error) { _ = bridge.close() })
 	handle := bridge.handle()
 	resolve.Invoke(handle)
 	go bridge.read()
@@ -161,6 +168,9 @@ type sessionBridge struct {
 	cancel    context.CancelFunc
 	session   *sshclient.Session
 	callbacks js.Value
+	// writes carries input to the session off the callback goroutine; see
+	// package writequeue for why a callback must not write directly.
+	writes *writequeue.Queue
 
 	closeOnce sync.Once
 	closeErr  error
@@ -179,7 +189,7 @@ func (b *sessionBridge) handle() js.Value {
 		}
 		data := make([]byte, args[0].Get("byteLength").Int())
 		js.CopyBytesToGo(data, args[0])
-		if _, err := b.session.Write(data); err != nil {
+		if err := b.writes.Enqueue(data); err != nil {
 			return err.Error()
 		}
 		return nil
@@ -237,6 +247,7 @@ func (b *sessionBridge) read() {
 func (b *sessionBridge) close() error {
 	b.closeOnce.Do(func() {
 		b.cancel()
+		b.writes.Close()
 		b.closeErr = b.session.Close()
 		if _, err := callJS(b.callbacks, "onClose"); err != nil {
 			b.closeErr = errors.Join(b.closeErr, err)
