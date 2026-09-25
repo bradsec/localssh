@@ -14,10 +14,19 @@ and terminal appearance settings use `localStorage`. See the root README's
 [Address book](../README.md#address-book) section for the full storage and
 security model.
 
+Vault writes use IndexedDB to serialize changes across tabs while keeping the
+existing encrypted blob in `localStorage`. A stale save locks the vault and
+asks you to reload and unlock again; unsaved edits must be entered again.
+Reload all open tabs after upgrading from a version without this protection.
+
 The terminal automatically reports its fitted rows and columns to the remote
 PTY. Resizing the browser, rotating a phone, opening an on-screen keyboard, or
 changing the terminal font updates the remote session geometry so width-aware
 commands format their output correctly.
+
+If the engine rejects input, including when its 8 MiB input queue is full, an
+alert reports that the input was not sent. The session remains connected.
+Rejected input is not retried automatically; the alert stays until disconnect.
 
 Touch gestures: swipe right for Tab, swipe left for Esc, flick up or down for
 command history, and long-press then drag to select terminal text. Vertical

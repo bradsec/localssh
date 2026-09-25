@@ -250,7 +250,10 @@ Changing `VERSION` on `main` runs the release workflow. The workflow validates
 the calendar date, runs the engine, relay, and frontend checks, publishes
 multi-platform frontend and relay images to GitHub Container Registry, and
 creates a matching `vYYYY.MM.DD` or `vYYYY.MM.DD.N` GitHub release. Each
-calendar version can be released only once.
+calendar version can be released only once. Both versioned images must finish
+building and attestation before either `latest` tag is promoted. Registry tag
+updates are separate operations, so promotion is not atomic across images;
+pin `LOCALSSH_VERSION` when deploying an exact release pair.
 
 ## Security model
 
@@ -301,6 +304,11 @@ reference to the entry, and the engine supplies the password itself.
 The vault is a single encrypted blob in `localStorage`. Nicknames, hostnames,
 and usernames are inside it, so a reader of your browser storage learns only
 that a vault exists.
+
+Vault writes use IndexedDB to serialize changes across tabs while keeping the
+existing encrypted blob in `localStorage`. A stale save locks the vault and
+asks you to reload and unlock again; unsaved edits must be entered again.
+Reload all open tabs after upgrading from a version without this protection.
 
 An unlock lasts one page load. Reloading, opening a new tab, or restarting the
 browser asks for the master password again.
