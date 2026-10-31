@@ -78,7 +78,7 @@ button,
 summary,
 input,
 select {
-  min-height: 42px;
+  min-height: 44px;
 }
 
 button {
@@ -88,7 +88,8 @@ button {
 button:focus-visible,
 summary:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
@@ -127,6 +128,15 @@ h2 {
   overflow: hidden;
   color: var(--text);
   background: var(--canvas);
+}
+
+.app-shell--connect {
+  height: auto;
+  overflow: visible;
+}
+
+body:has(.app-shell--connect) {
+  overflow-y: auto;
 }
 
 /* Only a running session follows the visual viewport (--app-height and
@@ -268,7 +278,7 @@ h2 {
 .clipboard-menu summary {
   display: inline-flex;
   gap: 6px;
-  min-height: 36px;
+  min-height: 44px;
   align-items: center;
   padding: 0 11px;
   border: 1px solid transparent;
@@ -308,6 +318,10 @@ h2 {
   overflow: hidden;
   padding: 12px;
   background: var(--canvas);
+}
+
+.app-shell--connect .workspace {
+  overflow: visible;
 }
 
 .terminal-frame {
@@ -488,9 +502,8 @@ h2 {
   grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr);
   align-self: center;
   width: min(calc(100% - 48px), 860px);
-  max-height: calc(100% - 48px);
   margin: auto;
-  overflow: auto;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface-raised);
@@ -586,7 +599,7 @@ h2 {
 
 .saved-hosts__lock {
   gap: 0.3rem;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 0.55rem;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -826,7 +839,7 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
+  min-height: 44px;
   padding: 0.4rem 0.55rem;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -964,7 +977,7 @@ h2 {
 }
 
 .button {
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 15px;
   border: 1px solid transparent;
   border-radius: 9px;
@@ -1322,7 +1335,7 @@ h2 {
 
 .about__link {
   display: flex;
-  min-height: 42px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 9px;
@@ -1393,7 +1406,7 @@ h2 {
 }
 
 .clipboard-menu__action {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -1432,7 +1445,7 @@ h2 {
   color: var(--text);
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: max(16px, 0.8rem);
   resize: none;
 }
 
@@ -1564,7 +1577,6 @@ h2 {
     grid-template-columns: 1fr;
     align-self: start;
     width: min(calc(100% - 16px), 520px);
-    max-height: calc(100% - 16px);
     margin-top: 8px;
   }
 

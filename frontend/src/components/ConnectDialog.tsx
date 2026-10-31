@@ -116,13 +116,6 @@ export function ConnectDialog({ vault, onConnect, disabled }: ConnectDialogProps
         <p className="connect-version">Version {APP_VERSION}</p>
       </div>
 
-      <SavedHosts
-        vault={vault}
-        current={{ host, port: Number(port), username }}
-        disabled={disabled}
-        onPick={handlePick}
-      />
-
       <form className="connect-form" onSubmit={handleSubmit}>
         <h2>Connection details</h2>
         <label className="field connect-form__host">
@@ -177,6 +170,12 @@ export function ConnectDialog({ vault, onConnect, disabled }: ConnectDialogProps
           {disabled ? "Connecting..." : "Connect"}
         </button>
       </form>
+      <SavedHosts
+        vault={vault}
+        current={{ host, port: Number(port), username }}
+        disabled={disabled}
+        onPick={handlePick}
+      />
     </section>
   );
 }

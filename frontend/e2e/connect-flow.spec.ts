@@ -1,5 +1,20 @@
 import { expect, test } from "@playwright/test";
 
+for (const viewport of [
+  { width: 320, height: 700 },
+  { width: 390, height: 844 },
+  { width: 1440, height: 900 },
+]) {
+  test(`keeps the connect action in view at ${viewport.width}px`, async ({ browser }) => {
+    const page = await browser.newPage({ viewport });
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: /^Connect$/i })).toBeInViewport();
+    await page.getByRole("heading", { name: "Saved hosts" }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("heading", { name: "Saved hosts" })).toBeInViewport();
+    await page.close();
+  });
+}
+
 test("connects through the relay, trusts the host key, and echoes input", async ({ page }) => {
   const sshdAddress = process.env.E2E_SSHD_ADDR;
   expect(sshdAddress, "global setup must provide the SSH server address").toBeTruthy();

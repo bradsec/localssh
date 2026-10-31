@@ -37,20 +37,28 @@ describe("ClipboardMenu", () => {
     setClipboard({ writeText });
     render(<ClipboardMenu hasSelection getSelection={() => "line one"} onPaste={vi.fn()} />);
 
+    await userEvent.click(screen.getByRole("button", { name: /^Clipboard/ }));
     await userEvent.click(screen.getByRole("button", { name: "Copy selection" }));
 
     expect(writeText).toHaveBeenCalledWith("line one");
     expect(await screen.findByText("Copied the selection.")).toBeInTheDocument();
   });
 
-  it("reports when the browser blocks the copy", async () => {
+  it("offers selectable text when the browser blocks the copy", async () => {
     setClipboard(undefined);
     setExecCommand(vi.fn().mockReturnValue(false));
     render(<ClipboardMenu hasSelection getSelection={() => "line one"} onPaste={vi.fn()} />);
 
+    await userEvent.click(screen.getByRole("button", { name: /^Clipboard/ }));
     await userEvent.click(screen.getByRole("button", { name: "Copy selection" }));
 
-    expect(await screen.findByText("The browser blocked the copy.")).toBeInTheDocument();
+    expect(await screen.findByText(/The browser blocked the copy/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Selection to copy manually" })).toHaveValue(
+      "line one",
+    );
+    expect(
+      screen.getByRole("button", { name: "Copy selection" }).closest("details"),
+    ).toHaveAttribute("open");
   });
 
   it("forwards text pasted into the field to the session", async () => {

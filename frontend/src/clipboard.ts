@@ -44,8 +44,10 @@ function copyViaExecCommand(text: string): boolean {
   staging.style.position = "fixed";
   staging.style.top = "-9999px";
   staging.style.opacity = "0";
+  staging.dataset.clipboardStaging = "";
   document.body.appendChild(staging);
 
+  const previousFocus = document.activeElement;
   const selection = document.getSelection();
   const preserved = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 
@@ -61,6 +63,7 @@ function copyViaExecCommand(text: string): boolean {
   }
 
   staging.remove();
+  if (previousFocus instanceof HTMLElement) previousFocus.focus();
   if (preserved && selection) {
     selection.removeAllRanges();
     selection.addRange(preserved);

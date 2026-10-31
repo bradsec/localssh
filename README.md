@@ -357,6 +357,10 @@ above the 44px touch target. Pinch-zoom is disabled over the terminal, where
 zooming would hide the prompt and reflow nothing: set the font size from the
 Appearance menu instead.
 
+Connection details come before the optional saved-host vault. The connect page
+scrolls when its contents exceed the viewport, including while the keyboard is
+open.
+
 While a session is up, the shell follows the visual viewport rather than the
 page, so the terminal refits into whatever the on-screen keyboard leaves and the
 cursor row stays above it. Tapping the terminal raises the keyboard, and
@@ -412,6 +416,9 @@ toolbar for copying that selection and for pasting without a hardware keyboard:
 | Copy selection         | Copies the current terminal selection. Enabled only while text is selected. |
 | Paste here             | A field to paste into with the on-screen callout; its contents are sent to the session. |
 | Paste from clipboard   | Reads the system clipboard directly and sends it. Best effort: the browser blocks clipboard reads on the plain-HTTP LAN deployment, and the paste field is the fallback. |
+
+If automatic copy fails, the menu shows the selected text in a read-only field.
+Select it and use the device's Copy action.
 
 A dot on the menu marks when the terminal has a selection ready to copy, and
 turns green once that selection has been copied.

@@ -25,11 +25,17 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
+  const [manualCopy, setManualCopy] = useState("");
 
   useEffect(() => {
     if (!open) return;
 
     const closeOnOutside = (event: Event) => {
+      if (
+        event.type === "focusin" &&
+        (event.target as Element).hasAttribute("data-clipboard-staging")
+      )
+        return;
       if (!detailsRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -56,7 +62,12 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
     }
     const ok = await writeClipboardText(text);
     setCopied(ok);
-    setStatus(ok ? "Copied the selection." : "The browser blocked the copy.");
+    setManualCopy(ok ? "" : text);
+    setStatus(
+      ok
+        ? "Copied the selection."
+        : "The browser blocked the copy. Select the text below and use your device's Copy action.",
+    );
   };
 
   const sendPaste = (text: string) => {
@@ -99,6 +110,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
         if (!nextOpen) {
           setStatus("");
           setCopied(false);
+          setManualCopy("");
           if (pasteFieldRef.current) pasteFieldRef.current.value = "";
         }
       }}
@@ -125,6 +137,17 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
         >
           Copy selection
         </button>
+        {manualCopy && (
+          <label className="clipboard-menu__field">
+            <span>Selection to copy manually</span>
+            <textarea
+              readOnly
+              rows={3}
+              value={manualCopy}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </label>
+        )}
         <label className="clipboard-menu__field">
           <span>Paste here</span>
           <textarea

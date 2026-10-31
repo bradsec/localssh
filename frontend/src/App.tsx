@@ -235,7 +235,13 @@ export function App() {
   }, [updateModifiers]);
 
   return (
-    <main className={status.kind === "connected" ? "app-shell app-shell--session" : "app-shell"}>
+    <main
+      className={
+        status.kind === "connected"
+          ? "app-shell app-shell--session"
+          : "app-shell app-shell--connect"
+      }
+    >
       <header className="app-toolbar">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">
