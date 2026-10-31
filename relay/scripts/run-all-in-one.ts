@@ -28,6 +28,7 @@ const relay = startLocalRelay({
   server,
   path: "/relay",
   sameOrigin: !process.env.ALLOWED_ORIGINS,
+  publicHosts: process.env.PUBLIC_HOSTS?.split(",") ?? [],
   accessConfig,
   maxSessions: Number(process.env.MAX_SESSIONS ?? 256),
   targetConnectTimeoutMs: Number(process.env.TARGET_CONNECT_TIMEOUT_MS ?? 10_000),

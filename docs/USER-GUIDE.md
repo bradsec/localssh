@@ -70,6 +70,10 @@ limit. If a connected terminal stops after a network loss, reconnect when the
 network returns. Use **Help** in the app for the error's matching topic and
 technical details.
 
+For the combined image under your own domain, set `PUBLIC_HOSTS` to the page
+hostname. The default same-origin check limits accepted page hosts because
+matching Origin and Host alone permits DNS rebinding.
+
 The SSH engine runs in the browser. The relay forwards encrypted SSH bytes;
 the target host and port are visible to it. The SSH server receives credentials
 through SSH. localssh has no application account or credential server. The

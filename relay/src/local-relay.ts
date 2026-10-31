@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { createConnection, type Socket } from "node:net";
+import { createConnection, isIP, type Socket } from "node:net";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import {
@@ -52,6 +52,8 @@ export interface LocalRelayOptions {
   server?: HttpServer | HttpsServer;
   path?: string;
   sameOrigin?: boolean;
+  /** Public page hostnames permitted when sameOrigin is enabled. */
+  publicHosts?: string[];
   /**
    * Interface to bind. Defaults to loopback: this relay dials arbitrary TCP
    * for whoever connects, so exposing it beyond the local machine turns it
@@ -104,6 +106,19 @@ function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
+function isAllowedPageHost(hostHeader: string | undefined, publicHosts: string[]): boolean {
+  if (!hostHeader) return false;
+  const hostname = new URL(`http://${hostHeader}`).hostname.toLowerCase();
+  const ip = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  return (
+    isIP(ip) !== 0 ||
+    hostname === "localhost" ||
+    (!hostname.includes(".") && hostname !== "") ||
+    [".local", ".lan", ".home.arpa", ".internal"].some((suffix) => hostname.endsWith(suffix)) ||
+    publicHosts.some((host) => host.trim().toLowerCase() === hostname)
+  );
+}
+
 function assertPositiveInteger(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`${name} must be a positive integer`);
@@ -115,6 +130,7 @@ export function startLocalRelay({
   server,
   path,
   sameOrigin = false,
+  publicHosts = [],
   host = "127.0.0.1",
   accessConfig,
   connectFrameTimeoutMs = CONNECT_FRAME_TIMEOUT_MS,
@@ -143,6 +159,7 @@ export function startLocalRelay({
     maxPayload: MAX_WEBSOCKET_MESSAGE_BYTES,
     verifyClient: (info, done) => {
       if (wss.clients.size >= maxSessions) {
+        log(`refused handshake from ${describeClient(info.req)}: relay session limit reached`);
         done(false, 503, "relay session limit reached");
         return;
       }
@@ -151,8 +168,13 @@ export function startLocalRelay({
         return;
       }
       try {
-        if (sameOrigin && new URL(info.origin).host !== info.req.headers.host) {
-          throw new AccessDeniedError("origin does not match this server");
+        if (sameOrigin) {
+          if (new URL(info.origin).host.toLowerCase() !== info.req.headers.host?.toLowerCase()) {
+            throw new AccessDeniedError("origin does not match this server");
+          }
+          if (!isAllowedPageHost(info.req.headers.host, publicHosts)) {
+            throw new AccessDeniedError(`server hostname not allowed: ${info.req.headers.host}`);
+          }
         }
         assertOriginAllowed(info.origin, accessConfig);
         done(true);
@@ -162,7 +184,7 @@ export function startLocalRelay({
         log(
           `refused handshake from ${from}: ${message}. ` +
             `Add the exact page origin ${describeOrigin(info.origin)} to ALLOWED_ORIGINS, ` +
-            "or set ALLOWED_ORIGINS=* for a firewalled local network.",
+            "or add a public page hostname to PUBLIC_HOSTS in same-origin mode.",
         );
         done(false, 403, message);
       }

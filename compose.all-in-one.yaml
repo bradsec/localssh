@@ -9,3 +9,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9080:80"
+    # When serving under your own domain, allow its page hostname explicitly.
+    # Matching Origin and Host alone permits DNS rebinding.
+    # environment:
+    #   PUBLIC_HOSTS: app.example.com

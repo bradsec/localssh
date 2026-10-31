@@ -252,7 +252,8 @@ cp .env.example .env
 | -------- | ------- | ------- |
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface for the web port. Use `0.0.0.0` for LAN access. |
 | `FRONTEND_PORT` | `9080` | Host port for the web interface. |
-| `ALLOWED_ORIGINS` | local frontend URLs in two-image Compose; page origin in the combined image | Browser origins allowed to use the relay. Exact scheme, host, and port; `*` permits any origin. |
+| `ALLOWED_ORIGINS` | local frontend URLs in two-image Compose; `*` with same-origin Host checks in the combined image | Browser origins allowed to use the relay. Explicit entries match exact scheme, host, and port; `*` permits any origin in the standalone relay. |
+| `PUBLIC_HOSTS` | unset | Combined image only. Comma-separated public page hostnames allowed in default same-origin mode; case-insensitive, without ports. |
 | `ALLOWED_HOSTS` | `*` | Comma-separated target hosts. `*.example.com` matches subdomains, not the bare name. A hostname rule trusts DNS for that name. |
 | `ALLOWED_PORTS` | `22` | Comma-separated target TCP ports. |
 | `MAX_SESSIONS` | `256` | Maximum concurrent relay sessions. New sessions receive HTTP 503 at capacity. |
@@ -269,6 +270,13 @@ use `latest` as written; edit their image reference to pin a published
 the example does not pass every variable to the combined container. See
 [Docker's Compose interpolation reference](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation)
 (accessed 2026-11-01, current Compose CLI).
+
+In the combined image, the default same-origin check accepts IP addresses,
+`localhost`, single-label names, and names ending in `.local`, `.lan`,
+`.home.arpa`, or `.internal`. Set `PUBLIC_HOSTS=app.example.com` when you serve
+the page under your own domain; matching Origin and Host headers alone cannot
+protect the relay from DNS rebinding. An explicit `ALLOWED_ORIGINS` list keeps
+its existing behavior and does not use `PUBLIC_HOSTS`.
 
 Unless it is `*`, `ALLOWED_ORIGINS` must contain every exact URL used to open the
 interface, including its scheme, hostname or address, and non-default port. For a

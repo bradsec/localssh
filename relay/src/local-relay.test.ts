@@ -7,7 +7,8 @@ import { encodeConnectFrame } from "./protocol.js";
 
 describe("local relay", () => {
   it("rejects sessions above the configured limit and recovers capacity", async () => {
-    const wss = startLocalRelay({ port: 0, maxSessions: 1 });
+    const log = vi.fn();
+    const wss = startLocalRelay({ port: 0, maxSessions: 1, log });
     await new Promise<void>((resolve) => wss.once("listening", resolve));
     const relayPort = (wss.address() as AddressInfo).port;
 
@@ -23,6 +24,9 @@ describe("local relay", () => {
       });
     });
     expect(status).toBe(503);
+    expect(log.mock.calls.map(([line]) => String(line)).join("\n")).toContain(
+      "relay session limit reached",
+    );
 
     first.close();
     await new Promise<void>((resolve) => first.once("close", resolve));
@@ -159,6 +163,54 @@ describe("local relay", () => {
     expect(status).toBe(403);
     wss.close();
   });
+
+  it.each([
+    ["127.0.0.1:9080", "http://127.0.0.1:9080", [], true],
+    ["[::1]:9080", "http://[::1]:9080", [], true],
+    ["localhost:9080", "http://localhost:9080", [], true],
+    ["server:9080", "http://server:9080", [], true],
+    ["server.local:9080", "http://server.local:9080", [], true],
+    ["server.lan:9080", "http://server.lan:9080", [], true],
+    ["server.home.arpa:9080", "http://server.home.arpa:9080", [], true],
+    ["server.internal:9080", "http://server.internal:9080", [], true],
+    ["App.Example.Com:9080", "http://app.example.com:9080", ["APP.EXAMPLE.COM"], true],
+    ["sub.app.example.com:9080", "http://sub.app.example.com:9080", ["app.example.com"], false],
+    ["evil.example:9080", "http://evil.example:9080", [], false],
+  ])(
+    "checks same-origin Host %s against local or public names",
+    async (host, origin, publicHosts, allowed) => {
+      const log = vi.fn();
+      const wss = startLocalRelay({
+        port: 0,
+        sameOrigin: true,
+        publicHosts,
+        log,
+        accessConfig: parseAccessConfig({ ALLOWED_ORIGINS: "*", ALLOWED_HOSTS: "*" }),
+      });
+      await new Promise<void>((resolve) => wss.once("listening", resolve));
+      const relayPort = (wss.address() as AddressInfo).port;
+      const client = new WebSocket(`ws://127.0.0.1:${relayPort}`, {
+        origin,
+        headers: { Host: host },
+      });
+      client.on("error", () => {});
+      if (allowed) {
+        await new Promise<void>((resolve) => client.once("open", resolve));
+        client.close();
+        await new Promise<void>((resolve) => client.once("close", resolve));
+      } else {
+        const status = await new Promise<number>((resolve) =>
+          client.once("unexpected-response", (_request, response) => {
+            response.resume();
+            resolve(response.statusCode ?? 0);
+          }),
+        );
+        expect(status).toBe(403);
+        expect(log.mock.calls.map(([line]) => String(line)).join("\n")).toContain(host);
+      }
+      await closeLocalRelay(wss);
+    },
+  );
 
   it("closes a target outside the configured allowlist", async () => {
     const wss = startLocalRelay({

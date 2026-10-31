@@ -131,3 +131,9 @@ The TLS healthcheck follows `PORT`. Keep the test SSH server running for this ch
 ## Current source checks
 
 Primary sources accessed 2026-11-01: [GitHub workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) for triggers, permissions, and concurrency; [setup-node v7 README](https://github.com/actions/setup-node/blob/v7/README.md) for `.nvmrc` and npm cache inputs; [Docker GitHub Actions cache](https://docs.docker.com/build/cache/backends/gha/) for scoped cache syntax; [metadata-action v6.2.0](https://github.com/docker/metadata-action/tree/v6.2.0) for raw CalVer tags and OCI labels; [Go vulnerability tooling](https://pkg.go.dev/golang.org/x/vuln/scan) for GOOS/GOARCH environment; [MDN connect-src](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/connect-src) for WebSocket policy; [MDN CSP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP) for WASM and script policy; [MDN clickjacking](https://developer.mozilla.org/en-US/docs/Web/Security/Attacks/Clickjacking) for frame denial. The goyt [Quality](https://github.com/bradsec/goyt/blob/main/.github/workflows/quality.yml) and [Release](https://github.com/bradsec/goyt/blob/main/.github/workflows/release.yml) shapes were read on 2026-11-01; this repository retains full-SHA pins and attestation gates.
+
+## Post-review fixes
+
+- Same-origin relay handshakes now restrict page Host names and support `PUBLIC_HOSTS` for owner-controlled domains.
+- DOC-11: session-limit HTTP 503 refusals now appear in the relay log.
+- DOC-09: in-app Help now states the failed replacement risk without atomic rename.

@@ -44,6 +44,12 @@ describe("help topics", () => {
     expect(troubleshooting?.paragraphs.join(" ")).toContain("MAX_SESSIONS");
   });
 
+  it("warns when a replacement fails without atomic rename", () => {
+    const files = HELP_TOPICS.find((topic) => topic.id === "files");
+    expect(files?.paragraphs.join(" ")).toContain("If the server supports atomic rename");
+    expect(files?.paragraphs.join(" ")).toContain("previous remote file");
+  });
+
   it("returns nothing for a search that matches no topic", () => {
     expect(filterHelpTopics("kubernetes")).toEqual([]);
   });
