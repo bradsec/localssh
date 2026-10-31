@@ -95,6 +95,7 @@ export function App() {
   const activeTab = tabs.find((tab) => tab.id === activeId) ?? null;
   const currentTab = () => tabsRef.current.find((tab) => tab.id === activeIdRef.current);
   const selectTab = (id: number | null, focusTerminal = true) => {
+    if (tabsRef.current.find((tab) => tab.id === id)?.connecting) id = null;
     currentTab()?.controls?.blur();
     activeIdRef.current = id;
     setActiveId(id);
@@ -292,10 +293,17 @@ export function App() {
     if (status.kind !== "unknown-host") return;
     try {
       await trustHostKey(status.hostPort, status.fingerprint);
-      await attemptConnect(
-        status.pending,
-        tabsRef.current.find((tab) => tab.id === status.tabId),
-      );
+      const tab = tabsRef.current.find((entry) => entry.id === status.tabId);
+      if (!tab) {
+        if (status.pending.password.kind === "key") status.pending.password.privateKey.fill(0);
+        setStatus((current) =>
+          current.kind === "unknown-host" && current.tabId === status.tabId
+            ? { kind: "idle" }
+            : current,
+        );
+        return;
+      }
+      await attemptConnect(status.pending, tab);
     } catch (error) {
       tabsRef.current = tabsRef.current.filter((tab) => tab.id !== status.tabId);
       setTabs(tabsRef.current);
@@ -411,7 +419,7 @@ export function App() {
                   aria-selected={activeId === tab.id}
                   aria-controls={`terminal-panel-${tab.id}`}
                   aria-label={`${tab.host}, ${tab.handle ? "connected" : tab.connecting ? "connecting" : "disconnected"}`}
-                  onClick={() => selectTab(tab.connecting ? null : tab.id)}
+                  onClick={() => selectTab(tab.id)}
                   onKeyDown={(event) => {
                     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
                     event.preventDefault();
@@ -421,7 +429,7 @@ export function App() {
                         (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
                       ];
                     if (next) {
-                      selectTab(next.connecting ? null : next.id, false);
+                      selectTab(next.id, false);
                       document
                         .querySelector<HTMLElement>(`[aria-controls="terminal-panel-${next.id}"]`)
                         ?.focus();

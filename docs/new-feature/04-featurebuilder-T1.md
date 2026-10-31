@@ -80,3 +80,9 @@ The new App tests exercised a failed second connection, a dropped sibling, a pen
 - Physical iOS and Android keyboard, safe-area, horizontal tab overflow, and screen-reader traversal were not checked. Chromium emulation checked 390px targets and the browser suite checked desktop switching.
 - A real silent Wi-Fi loss was not reproduced. Go tests proved the request and close behavior; the existing browser connection-lost path was exercised separately.
 - Docker images were not built because the sandbox may make buildx state read-only; no Docker build was attempted.
+
+## Fix F1, F2
+
+- F1: `trustAndRetry` checks the pending tab after host-key storage resolves. If the tab closed, it wipes pending private-key bytes and drops pending password and host-key state without starting another connection. A cancellation-race unit test failed before the fix and passed after it.
+- F2: click, arrow-key navigation, and the tab-switch shortcut now use the same connecting-tab handling in `selectTab`. A unit test for switching to a pending host-key prompt failed before the fix and passed after it.
+- Frontend verification: 308 unit tests passed; TypeScript, lint, format check, and build exited 0; 21 Playwright tests passed. The build retained its existing chunk-size warning.

@@ -285,6 +285,65 @@ describe("App", () => {
     );
   });
 
+  it("does not retry a trusted host after its pending tab closes", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    let finishTrust!: () => void;
+    vi.mocked(engine.connectSession)
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new engine.HostKeyRejectedError("second.example:22", "SHA256:other"));
+    vi.mocked(knownHostsStore.trustHostKey).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishTrust = resolve;
+        }),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await user.type(screen.getByLabelText(/^host$/i), "second.example");
+    await user.type(screen.getByLabelText(/^username$/i), "admin");
+    await user.click(screen.getByLabelText(/^private key$/i));
+    await user.type(screen.getByLabelText(/or paste the private key/i), "test-key");
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    await screen.findByRole("alertdialog", { name: "Verify host key" });
+    const key = vi.mocked(engine.connectSession).mock.calls[1]![0].password;
+
+    await user.click(screen.getByRole("button", { name: /trust and connect/i }));
+    await user.click(screen.getByRole("button", { name: "Return to open terminal" }));
+    await user.click(screen.getByRole("button", { name: "Close second.example terminal" }));
+    await act(async () => finishTrust());
+
+    expect(engine.connectSession).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("tab", { name: /second.example/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog", { name: "Verify host key" })).not.toBeInTheDocument();
+    if (key.kind === "key") {
+      expect(Array.from(key.privateKey)).toEqual(Array(8).fill(0));
+    }
+    expect(first.close).not.toHaveBeenCalled();
+  });
+
+  it("shows the pending host-key prompt when a shortcut switches to its tab", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession)
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new engine.HostKeyRejectedError("second.example:22", "SHA256:other"));
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await submitConnect(user, "second.example");
+    await screen.findByRole("alertdialog", { name: "Verify host key" });
+    await user.click(screen.getByRole("button", { name: "Return to open terminal" }));
+
+    await user.keyboard("{Control>}{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}{/Control}");
+
+    expect(screen.getByRole("alertdialog", { name: "Verify host key" })).toHaveTextContent(
+      "second.example:22",
+    );
+    expect(first.close).not.toHaveBeenCalled();
+  });
+
   it("closes a connection that finishes after its pending tab was removed", async () => {
     const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
     const late: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
