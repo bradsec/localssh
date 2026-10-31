@@ -13,14 +13,14 @@ let writeDB: Promise<IDBPDatabase> | null = null;
 
 export class StorageFullError extends Error {
   constructor() {
-    super("Browser storage is full, so the vault could not be saved.");
+    super("Browser storage is full. Free space in this browser, then unlock and try again.");
     this.name = "StorageFullError";
   }
 }
 
 export class StorageUnavailableError extends Error {
   constructor() {
-    super("Browser storage is unavailable, so the vault could not be saved.");
+    super("Browser storage is unavailable. Allow storage, then unlock and try again.");
     this.name = "StorageUnavailableError";
   }
 }

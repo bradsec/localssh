@@ -178,7 +178,7 @@ export function SavedHostEditor({ entry, initial, busy, onSave, onCancel }: Save
           Cancel
         </button>
         <button className="button button--primary" type="submit" disabled={busy}>
-          {busy ? "Saving..." : "Save"}
+          {busy ? "Saving host..." : "Save host"}
         </button>
       </div>
     </form>

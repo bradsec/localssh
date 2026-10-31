@@ -8,9 +8,30 @@ for (const viewport of [
   test(`keeps the connect action in view at ${viewport.width}px`, async ({ browser }) => {
     const page = await browser.newPage({ viewport });
     await page.goto("/");
-    await expect(page.getByRole("button", { name: /^Connect$/i })).toBeInViewport();
+    await expect(page.getByRole("button", { name: /^Connect to server$/i })).toBeInViewport();
     await page.getByRole("heading", { name: "Saved hosts" }).scrollIntoViewIfNeeded();
     await expect(page.getByRole("heading", { name: "Saved hosts" })).toBeInViewport();
+    await page.close();
+  });
+
+  test(`keeps Help readable at ${viewport.width}px`, async ({ browser }) => {
+    const page = await browser.newPage({ viewport });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Help" }).click();
+    const panel = page.locator(".help__panel");
+    await expect(panel.getByRole("heading", { name: "Help with localssh" })).toBeVisible();
+    const bounds = await panel.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        width: element.clientWidth,
+        scroll: element.scrollWidth,
+      };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(viewport.width);
+    expect(bounds.scroll).toBeLessThanOrEqual(bounds.width);
     await page.close();
   });
 }
@@ -32,7 +53,7 @@ test("connects through the relay, trusts the host key, and echoes input", async 
   await page.getByLabel(/^Port$/i).fill(sshdPort);
   await page.getByLabel(/^Username$/i).fill("tester");
   await page.getByLabel(/^Password$/i).fill("s3cret");
-  await page.getByRole("button", { name: /^Connect$/i }).click();
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
 
   const hostKeyPrompt = page.getByRole("alertdialog", { name: /verify host key/i });
   await expect(hostKeyPrompt).toBeVisible();

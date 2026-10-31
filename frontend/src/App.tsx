@@ -3,6 +3,7 @@ import { About } from "./components/About.js";
 import { ClipboardMenu } from "./components/ClipboardMenu.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
+import { Help } from "./components/Help.js";
 import { Icon } from "./components/Icon.js";
 import { KeyBar } from "./components/KeyBar.js";
 import { Terminal, type TerminalControls } from "./components/Terminal.js";
@@ -277,6 +278,7 @@ export function App() {
             />
           )}
           <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
+          <Help />
           <About />
         </div>
       </header>

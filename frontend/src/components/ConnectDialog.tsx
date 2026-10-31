@@ -101,14 +101,14 @@ export function ConnectDialog({ vault, onConnect, disabled }: ConnectDialogProps
           ) : vault.status === "unavailable" ? (
             <>
               <strong>Saved hosts are unavailable</strong>
-              <span>Browser storage is unavailable on this device.</span>
+              <span>Allow browser storage to save hosts, or connect without saving.</span>
             </>
           ) : storesAPassword ? (
             <>
               <strong>Saved passwords on this device</strong>
               <span>
-                A saved password is encrypted in this browser under your master password and is
-                never sent anywhere. Typed passwords stay in memory for the connection only.
+                Saved passwords are encrypted in this browser. The SSH server receives your password
+                through the encrypted connection. The relay cannot read it.
               </span>
             </>
           ) : null}
@@ -167,7 +167,7 @@ export function ConnectDialog({ vault, onConnect, disabled }: ConnectDialogProps
           type="submit"
           disabled={disabled}
         >
-          {disabled ? "Connecting..." : "Connect"}
+          {disabled ? "Connecting to server..." : "Connect to server"}
         </button>
       </form>
       <SavedHosts

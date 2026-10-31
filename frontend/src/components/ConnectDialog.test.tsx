@@ -38,7 +38,7 @@ describe("ConnectDialog", () => {
     await userEvent.type(screen.getByLabelText(/^host$/i), "10.0.0.9");
     await userEvent.type(screen.getByLabelText(/^username$/i), "pi");
     await userEvent.type(screen.getByLabelText(/^password$/i), "hunter2");
-    await userEvent.click(screen.getByRole("button", { name: /^connect$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^connect to server$/i }));
 
     expect(onConnect).toHaveBeenCalledWith({
       host: "10.0.0.9",
@@ -164,6 +164,6 @@ describe("ConnectDialog", () => {
       />,
     );
 
-    expect(screen.getByText(/browser storage is unavailable on this device/i)).toBeInTheDocument();
+    expect(screen.getByText(/allow browser storage to save hosts/i)).toBeInTheDocument();
   });
 });

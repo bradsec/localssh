@@ -125,7 +125,7 @@ describe("useVault", () => {
 
     expect(outcome).toBe(false);
     expect(result.current.status).toBe("locked");
-    expect(result.current.error).toMatch(/not correct/i);
+    expect(result.current.error).toMatch(/incorrect/i);
   });
 
   it("persists the new blob after a save", async () => {

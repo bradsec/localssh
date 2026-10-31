@@ -90,7 +90,7 @@ async function connect(user: ReturnType<typeof userEvent.setup>, host: string) {
   await user.type(screen.getByLabelText(/^host$/i), host);
   await user.type(screen.getByLabelText(/^username$/i), "admin");
   await user.type(screen.getByLabelText(/^password$/i), "secret");
-  await user.click(screen.getByRole("button", { name: /^connect$/i }));
+  await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
   await screen.findByRole("button", { name: /disconnect/i });
 }
 
@@ -134,10 +134,10 @@ describe("App", () => {
     await user.type(screen.getByLabelText(/^host$/i), "10.0.0.5");
     await user.type(screen.getByLabelText(/^username$/i), "admin");
     await user.type(screen.getByLabelText(/^password$/i), "secret");
-    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("known-host storage unavailable");
-    expect(screen.getByRole("button", { name: /^connect$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^connect to server$/i })).toBeEnabled();
     expect(engine.connectSession).not.toHaveBeenCalled();
   });
 
@@ -174,7 +174,7 @@ describe("App", () => {
     await user.type(screen.getByLabelText(/^host$/i), "10.0.0.6");
     await user.type(screen.getByLabelText(/^username$/i), "admin");
     await user.type(screen.getByLabelText(/^password$/i), "secret");
-    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
     await user.click(await screen.findByRole("button", { name: /trust and connect/i }));
 
     await waitFor(() => expect(engine.connectSession).toHaveBeenCalledTimes(2));
@@ -196,7 +196,7 @@ describe("App", () => {
     await user.type(screen.getByLabelText(/^host$/i), "10.0.0.8");
     await user.type(screen.getByLabelText(/^username$/i), "admin");
     await user.type(screen.getByLabelText(/^password$/i), "secret");
-    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
 
     await waitFor(() => expect(handle.resize).toHaveBeenCalledWith(48, 20));
     await waitFor(() => expect(terminalFocus).toHaveBeenCalled());
@@ -234,7 +234,7 @@ describe("App", () => {
     await user.type(screen.getByLabelText(/^host$/i), "10.0.0.9");
     await user.type(screen.getByLabelText(/^username$/i), "admin");
     await user.type(screen.getByLabelText(/^password$/i), "secret");
-    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
 
     const disconnect = await screen.findByRole("button", { name: "Disconnect" });
     const icons = disconnect.querySelectorAll("svg");
@@ -262,7 +262,7 @@ describe("App", () => {
     await user.type(screen.getByLabelText(/^host$/i), "10.0.0.12");
     await user.type(screen.getByLabelText(/^username$/i), "admin");
     await user.type(screen.getByLabelText(/^password$/i), "secret");
-    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
 
     await waitFor(() =>
       expect(document.querySelector(".app-shell")).toHaveClass("app-shell--session"),

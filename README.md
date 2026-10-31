@@ -348,6 +348,10 @@ scroll wheel. The terminal reports its fitted size to the remote PTY, so
 resizing the window, rotating a phone, or opening an on-screen keyboard keeps
 width-aware commands formatting correctly.
 
+The toolbar's Help menu covers connection setup, host-key checks, saved hosts,
+terminal controls, keyboard shortcuts, copy and paste, connection problems,
+privacy, and self-hosting.
+
 ## Phones and tablets
 
 The interface is built for a small touch screen as much as for a desktop

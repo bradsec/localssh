@@ -30,14 +30,14 @@ export interface EntryInput {
 
 export class WrongPasswordError extends Error {
   constructor() {
-    super("That master password is not correct.");
+    super("Master password is incorrect. Try again or delete the saved hosts to start over.");
     this.name = "WrongPasswordError";
   }
 }
 
 export class VaultLockedError extends Error {
   constructor() {
-    super("The vault is locked.");
+    super("Saved hosts are locked. Unlock them with your master password and try again.");
     this.name = "VaultLockedError";
   }
 }

@@ -72,13 +72,13 @@ describe("ClipboardMenu", () => {
     expect(onPaste).toHaveBeenCalledWith("echo hi");
   });
 
-  it("sends the field contents with the Send box button", async () => {
+  it("sends the field contents with the Paste text button", async () => {
     const onPaste = vi.fn();
     render(<ClipboardMenu hasSelection={false} getSelection={() => ""} onPaste={onPaste} />);
 
     const field = screen.getByLabelText("Paste here");
     await userEvent.type(field, "manual text");
-    await userEvent.click(screen.getByRole("button", { name: "Send box" }));
+    await userEvent.click(screen.getByRole("button", { name: "Paste text" }));
 
     expect(onPaste).toHaveBeenCalledWith("manual text");
   });
@@ -90,7 +90,11 @@ describe("ClipboardMenu", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Paste from clipboard" }));
 
-    expect(await screen.findByText("Paste into the box below instead.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "The browser could not read the clipboard. Paste into the box below instead.",
+      ),
+    ).toBeInTheDocument();
     expect(onPaste).not.toHaveBeenCalled();
   });
 

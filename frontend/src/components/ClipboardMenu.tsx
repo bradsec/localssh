@@ -57,7 +57,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const copySelection = async () => {
     const text = getSelection();
     if (!text) {
-      setStatus("Nothing is selected in the terminal.");
+      setStatus("No terminal text is selected. Select text, then try Copy selection.");
       return;
     }
     const ok = await writeClipboardText(text);
@@ -81,7 +81,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const pasteFromClipboard = async () => {
     const text = await readClipboardText();
     if (text === null) {
-      setStatus("Paste into the box below instead.");
+      setStatus("The browser could not read the clipboard. Paste into the box below instead.");
       pasteFieldRef.current?.focus();
       return;
     }
@@ -174,7 +174,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
             className="clipboard-menu__action"
             onClick={() => sendPaste(pasteFieldRef.current?.value ?? "")}
           >
-            Send box
+            Paste text
           </button>
         </div>
         <p className="clipboard-menu__feedback" aria-live="polite">

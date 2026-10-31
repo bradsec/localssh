@@ -32,7 +32,7 @@ async function connect(page: Page) {
   await page.getByLabel(/^Port$/i).fill(sshdAddress!.slice(separator + 1));
   await page.getByLabel(/^Username$/i).fill("tester");
   await page.getByLabel(/^Password$/i).fill("s3cret");
-  await page.getByRole("button", { name: /^Connect$/i }).tap();
+  await page.getByRole("button", { name: /^Connect to server$/i }).tap();
   await page.getByRole("button", { name: /trust and connect/i }).tap();
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 }

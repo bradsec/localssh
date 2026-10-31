@@ -45,9 +45,9 @@ export function About() {
       </summary>
       <div className="about__panel">
         <p className="about__lede">
-          A browser SSH client. The engine runs as WebAssembly in this tab, so passwords and
-          host-key decisions never reach a server. Saved hosts are encrypted in this browser under a
-          master password and are never sent anywhere.
+          A browser SSH client. The engine runs as WebAssembly in this tab. The relay carries
+          encrypted SSH traffic and cannot read your password or terminal session. Saved hosts are
+          encrypted in this browser under a master password.
         </p>
         <dl className="about__meta">
           <dt>Version</dt>

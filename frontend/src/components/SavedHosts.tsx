@@ -109,11 +109,11 @@ function SetupForm({ vault }: { vault: VaultApi }) {
       </label>
       {mismatch && (
         <p className="saved-hosts__error" role="alert">
-          Those passwords do not match.
+          Master passwords do not match. Enter the same password in both fields.
         </p>
       )}
       <button className="button button--primary" type="submit" disabled={vault.busy}>
-        {vault.busy ? "Encrypting..." : "Create"}
+        {vault.busy ? "Creating address book..." : "Create address book"}
       </button>
     </form>
   );
@@ -145,7 +145,7 @@ function UnlockForm({ vault }: { vault: VaultApi }) {
           />
         </label>
         <button className="button button--primary" type="submit" disabled={vault.busy}>
-          {vault.busy ? "Unlocking..." : "Unlock"}
+          {vault.busy ? "Unlocking saved hosts..." : "Unlock saved hosts"}
         </button>
       </form>
 
@@ -264,7 +264,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
       {vault.entries.length === 0 && (
         <div className="saved-hosts__empty-state">
           <strong>No saved hosts yet</strong>
-          <span>Add the current connection details for quicker access next time.</span>
+          <span>Save the current connection to find it here next time.</span>
         </div>
       )}
 
@@ -365,7 +365,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
       <div className="saved-hosts__actions">
         <button className="saved-hosts__add" type="button" onClick={() => setEditing(null)}>
           <Icon name="add" size={18} />
-          Add current
+          Save current host
         </button>
         <ChangeMasterPassword vault={vault} />
       </div>
@@ -440,7 +440,7 @@ function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
       </label>
       {mismatch && (
         <p className="saved-hosts__error" role="alert">
-          Those passwords do not match.
+          New master passwords do not match. Enter the same password in both fields.
         </p>
       )}
       <div className="saved-host-editor__actions">
@@ -448,7 +448,7 @@ function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
           Cancel
         </button>
         <button className="button button--primary" type="submit" disabled={vault.busy}>
-          {vault.busy ? "Re-encrypting..." : "Change"}
+          {vault.busy ? "Changing master password..." : "Change master password"}
         </button>
       </div>
     </form>

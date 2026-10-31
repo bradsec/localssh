@@ -176,7 +176,7 @@ describe("SavedHosts", () => {
       expect(action.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     }
 
-    const add = screen.getByRole("button", { name: "Add current" });
+    const add = screen.getByRole("button", { name: "Save current host" });
     expect(add).not.toHaveAttribute("aria-label");
     expect(add.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
@@ -222,7 +222,7 @@ describe("SavedHosts", () => {
   it("opens the editor pre-filled from the connect form", async () => {
     render(<SavedHosts vault={vaultApi()} current={current} onPick={vi.fn()} />);
 
-    await userEvent.click(screen.getByRole("button", { name: /add current/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save current host/i }));
 
     expect(screen.getByLabelText(/^host$/i)).toHaveValue("10.0.0.9");
   });
@@ -270,7 +270,7 @@ describe("SavedHosts", () => {
       screen.getByLabelText(/confirm new master password/i),
       "new master password",
     );
-    await userEvent.click(screen.getByRole("button", { name: /^change$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^change master password$/i }));
 
     expect(vault.changePassword).toHaveBeenCalledWith("old master password", "new master password");
   });
@@ -283,7 +283,7 @@ describe("SavedHosts", () => {
     await userEvent.type(screen.getByLabelText(/current master password/i), "old master password");
     await userEvent.type(screen.getByLabelText(/^new master password$/i), "one password");
     await userEvent.type(screen.getByLabelText(/confirm new master password/i), "another password");
-    await userEvent.click(screen.getByRole("button", { name: /^change$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^change master password$/i }));
 
     expect(vault.changePassword).not.toHaveBeenCalled();
     expect(screen.getByText(/do not match/i)).toBeInTheDocument();
