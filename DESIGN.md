@@ -2,36 +2,68 @@
 
 ## System
 
-localssh is an operating interface for opening and using SSH sessions. The terminal is the primary surface. The connection form, saved-host vault, session toolbar, and touch key bar support that task.
+- Surface: Operate, responsive browser SSH workbench. Redesign mode: full visual overhaul of app chrome and connect layout. Product behavior and language remain governed by `PRODUCT.md`.
+- Direction: calm, compact, precise. The shell is the primary instrument; connection and saved hosts are adjacent work areas, not a marketing presentation.
+- Idea: On this app, the active SSH target becomes the fixed point that organizes connection, tabs, files, and help.
+- Primary jobs: connect to the intended server, verify its host key, work in a terminal, and recover from failures. Keep the relay outside the credential boundary.
 
 ## Tokens
 
-- UI text uses IBM Plex Sans. Terminal chrome uses IBM Plex Mono; the terminal defaults to the system monospace font and offers bundled alternatives.
-- The UI follows `prefers-color-scheme` with light and dark token sets in `frontend/src/app.css`. The terminal theme is chosen separately in Appearance and persists per browser.
-- Canvas, surface, text, border, danger, and focus tokens live in `frontend/src/app.css`. The indigo-grey accent is `#5f688a` in light mode and `#98a2c7` in dark mode. The default terminal bezel uses Tokyo Night colors.
-- Controls use an 8 to 9px radius, cards and dialogs use 12px, and the brand mark uses 9px. The terminal has square edges on narrow screens to preserve space.
-- Toolbar icons use vendored Material Symbols outlined paths in `frontend/src/components/Icon.tsx`. Text glyphs represent terminal keys.
+| Role | Light | Dark | Use |
+| --- | --- | --- | --- |
+| Canvas | `#F6F8F7` | `#151C1E` | App background |
+| Surface | `#FFFFFF` | `#1D2729` | Form, toolbar, dialog, file panel |
+| Surface subtle | `#ECF1F0` | `#263235` | Hover, selected neutral area |
+| Text | `#202A2B` | `#E6EDEF` | Primary copy |
+| Text muted | `#506062` | `#AAB9BB` | Secondary copy and labels |
+| Border decorative | `#D6DFDD` | `#39484B` | Dividers only |
+| Border control | `#788B8D` | `#74888A` | Input outline and control affordance |
+| Accent | `#245D6B` | `#75C1D1` | Primary action, active tab indicator, focus |
+| Accent text | `#FFFFFF` | `#151C1E` | Text on accent |
+| Danger | `#A53636` | `#F09994` | Errors and changed host key only |
+| Danger surface | `#FFF1F0` | `#342326` | Error panels |
+| Success | TBD | TBD | Success feedback only, never decoration |
+
+- Contrast checks by WCAG relative luminance: light text/canvas 13.79:1, muted/canvas 6.17:1, accent/white 7.36:1, control border/white 3.57:1. Dark text/canvas 14.57:1, muted/canvas 8.52:1, accent/canvas 8.47:1. Dark control border/surface must be checked at implementation because the adjacent surface differs from canvas.
+- Keep the existing bundled IBM Plex Sans and IBM Plex Mono. UI scale in CSS px: title 24/30 weight 600; section 18/24 weight 600; body and controls 14/20 weight 400 or 600; secondary 13/18; metadata 12/16. Inputs remain at least 16px. Terminal font family, size, theme, and user settings remain separate.
+- Spacing scale in CSS px: 4, 8, 12, 16, 24, 32. Use 16px for control grouping, 24px between work areas, 8px for label to field. Do not create elastic blank space between Connect and Saved hosts.
+- Radius: controls 6px, panels and dialogs 8px, terminal viewport 0px. Elevation: no shadow on the connect work area; one 0 8px 24px rgba(0,0,0,.16) shadow for overlays only.
+- Icons: local `lucide-react` package through npm and Vite, named imports only. Default icon size 18px, stroke width 2. No CDN or runtime fetch. Do not mix icon families. The GitHub brand mark remains a brand asset.
+- Motion: 120ms color or border feedback, 160ms overlay entrance if useful, no movement for terminal resizing or tab switching. Reduced motion makes transitions instant. No looping status lamp.
 
 ## Layout
 
-- Connection details precede optional saved hosts in the visual and keyboard order. The connect page uses document scrolling when needed.
-- An active session fills the visual viewport. The terminal owns vertical scrollback; the touch key bar scrolls horizontally.
-- The toolbar shows the connection state and target. On a narrow screen, the session identity gets its own row.
+- Breakpoints: phone below 720px, tablet 720 to 1023px, desktop 1024px and up. Keep a usable 320px minimum. Breakpoints describe layout changes, not device identity.
+- Connect desktop: 12-column grid capped at 1120px, 24px gutters. Connection occupies 7 columns, Saved hosts 5 columns. Top align both. No surrounding split hero card. At 720 to 1023px use 7/5 when fields fit; otherwise one column. At phone use one column with 16px side padding and 24px between work areas.
+- Connect visual order and DOM order: page title, connection fields and Connect action, Saved hosts. The connection form must not depend on vault setup. No centered vertical positioning.
+- Session desktop: 56px toolbar, 48px tab strip, remaining visual viewport for terminal. Files panel is a 360px side pane; terminal retains at least 560px. At narrower widths Files replaces the terminal viewport with a clear return control.
+- Session phone: 48px main toolbar with localssh, active target, and an overflow action; 44px horizontal tab strip; terminal fills remaining visual viewport; 44px touch key bar above safe area. Never allow toolbar controls to collide or clip.
+- Help: a dialog on desktop, full-height sheet on phone. Topic navigation and search stay visible; article content scrolls in a 60 to 75 character column. The close control remains reachable with a software keyboard.
+- Host-key prompt: desktop dialog capped at 560px; phone inset sheet with a scrollable fingerprint block and sticky actions above the safe area. Keep existing text and action labels.
 
 ## Components
 
-- Buttons, summaries, inputs, and selects have at least 44px height. Focus uses a 3px outline. The clipboard menu includes a read-only field when automatic copy fails.
-- The saved-host vault is local to the browser and separate from the connection form. Host-key verification uses a dialog before first connection or a changed key.
-- The touch key bar provides missing shell keys and sticky modifiers. Long press and drag selects terminal text; the Clipboard menu handles copy and paste.
+- All buttons, inputs, selects, summaries, tab controls, and key controls have at least 44 by 44 CSS px hit regions. Keep persistent labels and visible 3px focus outlines with 2px offset. Icon-only controls require accessible names.
+- Primary button: one per task region. Default accent fill; hover accent darkens in light mode or lightens in dark; active no positional shift; focus outlined; disabled shows text plus disabled affordance; loading uses current action text and reserves width.
+- Secondary button: surface fill, control border, text. Destructive button: danger fill or border only at a destructive decision. Menus and dialogs restore focus to their trigger.
+- Inputs: surface fill and control border; hover strengthens border; focus uses accent outline; invalid state shows text and danger border; disabled state stays readable. Do not use placeholder as label.
+- Tabs: active state uses a 2px accent underline and text weight, not an inverted pill. Inactive, hover, focus, connecting, disconnected, and close affordances must differ without relying on color alone. Retain keyboard tab navigation.
+- Status: show `Connecting`, `Connected`, or `Offline` only where it answers a task question. No idle lamp or pulsing dot. Include target and connection state in text during sessions.
+- Saved hosts: absent, locked, unlocked empty, unlocked populated, busy, storage unavailable, stale save, reset confirmation. Each state keeps Connect independent and preserves current error and recovery language.
+- Files: current folder, path, upload, list, transfer progress, empty, loading, error, overwrite confirmation, and close-during-transfer confirmation. Keep the current file and permission warnings.
+- Help: search, topic list, article, no results, close, and contextual topic entry. Keep headings, existing article text, and focus return behavior.
+- Host key: first connection and changed key remain distinct. Changed key uses danger styling and preserves both fingerprints and the explicit replacement decision.
 
 ## Rules
 
-- Preserve the existing indigo-grey accent, logo, control labels, form field names, and security language unless product requirements change.
-- Keep status and errors in text as well as color. Honor reduced motion. Retain a manual paste path because non-localhost HTTP LAN pages lack the Async Clipboard API.
-- Keep the relay outside the credential boundary. The browser hosts the Go WASM SSH engine; the relay transports encrypted SSH bytes.
+- Freeze navigation labels, URLs, form names and order, copy voice, analytics names, legal text, host-key wording, and product name unless a later task changes them. This redesign request authorizes removal of the ornamental connect copy named by the user.
+- Do not claim a successful user outcome from screenshots. Test with users on desktop and physical phones.
+- Do not add accounts, credential storage outside the browser, or plaintext handling by the relay. The Go WASM engine remains in the page.
+- Keep light and dark parity, safe-area padding, 16px input text floor, 44px touch targets, visible focus, and reduced motion.
+- Avoid gradient hero, generic logo tile, status lamps, eyebrow labels, version footers on the connect view, two-tone split cards, oversized shadows, and decorative pills.
 
 ## Open items
 
-- Verify selection, keyboard movement, and clipboard callouts on physical iPhone and iPad Safari. Chromium touch emulation does not reproduce native selection handles or WebKit keyboard behavior.
-- A later step owns in-app help. Useful entry points are the toolbar and the connection, vault, and clipboard failure states.
-- The clipboard icon and keyboard-dismiss cue use local SVG markup outside the Material Symbols map. Consolidate only if an official matching glyph exists.
+- Confirm whether the existing `>_` tile is a formal brand asset. The current brief treats it as UI decoration; preserve the localssh wordmark.
+- Check dark control border against `#1D2729` and verify every semantic token against its actual adjacent colors during implementation.
+- Run a full WCAG 2.2 AA audit and physical iOS/Android checks after implementation. Current Chromium captures do not prove mobile browser or screen reader behavior.
