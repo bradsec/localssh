@@ -10,4 +10,5 @@ frontend/public/engine.wasm
 frontend/public/wasm_exec.js
 frontend/test-results
 engine/dist
-relay
+relay/node_modules
+relay/dist

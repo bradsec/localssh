@@ -4,5 +4,12 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["scripts/run-relay.ts", "src/access.ts", "src/local-relay.ts", "src/protocol.ts"]
+  "include": [
+    "scripts/run-relay.ts",
+    "scripts/run-all-in-one.ts",
+    "src/access.ts",
+    "src/local-relay.ts",
+    "src/protocol.ts",
+    "src/web-server.ts"
+  ]
 }

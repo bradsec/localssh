@@ -58,6 +58,10 @@ others discover the project.
 
 ## Install with Docker
 
+The single-container option uses `docker run -p 9080:80 ghcr.io/bradsec/localssh:latest`.
+For Compose, use `docker compose -f compose.all-in-one.yaml up -d`.
+The existing two-container Compose setup remains below.
+
 Docker Compose pulls and starts the published frontend and relay images. Install
 Docker Engine with the Compose plugin, or Docker Desktop. No local Go or Node
 installation is required.

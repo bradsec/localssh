@@ -5,8 +5,9 @@ export default defineConfig({
   timeout: 30_000,
   globalSetup: "./playwright/global-setup.ts",
   webServer: {
-    command:
-      "../engine/build.sh && npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
+    command: process.env.E2E_COMBINED
+      ? "../engine/build.sh && npm run build && cd ../relay && npm run build && PORT=4173 STATIC_ROOT=../frontend/dist node dist/scripts/run-all-in-one.js"
+      : "../engine/build.sh && npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     env: { VITE_RELAY_WS_URL: "ws://127.0.0.1:8787" },

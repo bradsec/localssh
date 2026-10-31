@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { createConnection, type Socket } from "node:net";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, Server as HttpServer } from "node:http";
+import type { Server as HttpsServer } from "node:https";
 import {
   AccessDeniedError,
   assertOriginAllowed,
@@ -48,6 +49,9 @@ function targetFailureReason(error: NodeJS.ErrnoException, timedOut: boolean): s
 
 export interface LocalRelayOptions {
   port: number;
+  server?: HttpServer | HttpsServer;
+  path?: string;
+  sameOrigin?: boolean;
   /**
    * Interface to bind. Defaults to loopback: this relay dials arbitrary TCP
    * for whoever connects, so exposing it beyond the local machine turns it
@@ -108,6 +112,9 @@ function assertPositiveInteger(name: string, value: number): void {
 
 export function startLocalRelay({
   port,
+  server,
+  path,
+  sameOrigin = false,
   host = "127.0.0.1",
   accessConfig,
   connectFrameTimeoutMs = CONNECT_FRAME_TIMEOUT_MS,
@@ -132,8 +139,7 @@ export function startLocalRelay({
 
   let wss: WebSocketServer;
   wss = new WebSocketServer({
-    port,
-    host,
+    ...(server ? { server, path } : { port, host }),
     maxPayload: MAX_WEBSOCKET_MESSAGE_BYTES,
     verifyClient: (info, done) => {
       if (wss.clients.size >= maxSessions) {
@@ -145,6 +151,9 @@ export function startLocalRelay({
         return;
       }
       try {
+        if (sameOrigin && new URL(info.origin).host !== info.req.headers.host) {
+          throw new AccessDeniedError("origin does not match this server");
+        }
         assertOriginAllowed(info.origin, accessConfig);
         done(true);
       } catch (error) {

@@ -21,4 +21,5 @@ COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 EXPOSE 8787
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD node -e "require('node:net').connect(8787,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
 CMD ["node", "dist/scripts/run-relay.js"]

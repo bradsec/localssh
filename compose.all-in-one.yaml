@@ -1,0 +1,11 @@
+name: localssh
+
+services:
+  localssh:
+    image: ghcr.io/bradsec/localssh:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.all-in-one
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9080:80"

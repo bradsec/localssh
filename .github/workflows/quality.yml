@@ -1,0 +1,79 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            relay/package-lock.json
+      - name: Check engine
+        working-directory: engine
+        run: |
+          go vet ./...
+          GOOS=js GOARCH=wasm go vet ./...
+          go test -race ./...
+          ./build.sh
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+          GOOS=js GOARCH=wasm "$(go env GOPATH)/bin/govulncheck" ./...
+      - name: Check relay
+        working-directory: relay
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm test
+          npm run lint
+          npm run format:check
+          npm run build
+      - name: Check frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm test
+          npm run lint
+          npm run format:check
+          npx tsc -b
+          npm run build
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        working-directory: frontend
+        run: E2E_COMBINED=1 npm run test:e2e
+      - name: Build combined image
+        run: docker build -f Dockerfile.all-in-one -t localssh:smoke .
+      - name: Smoke combined image
+        run: |
+          docker run -d --name localssh-smoke -p 127.0.0.1:19080:80 localssh:smoke
+          trap 'docker rm -f localssh-smoke' EXIT
+          for attempt in {1..30}; do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' localssh-smoke)" = healthy ]; then break; fi
+            if [ "$attempt" -eq 30 ]; then docker logs localssh-smoke; exit 1; fi
+            sleep 1
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' localssh-smoke)" = healthy
+          curl --fail --silent http://127.0.0.1:19080/healthz
