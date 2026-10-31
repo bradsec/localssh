@@ -19,7 +19,8 @@ declare global {
       callbacks: {
         onHostKey: (fingerprint: string) => boolean;
         onData: (chunk: Uint8Array) => void;
-        onClose: () => void;
+        /** Gets "" for a clean end, or why the connection was lost. */
+        onClose: (reason?: string) => void;
       },
     ) => Promise<SshHandle>;
   }
@@ -105,7 +106,8 @@ export interface ConnectOptions {
   // trusted fingerprints before connecting and look them up in memory here.
   isTrustedFingerprint: (fingerprint: string) => boolean;
   onData: (chunk: Uint8Array) => void;
-  onClose: () => void;
+  /** `reason` is "" when the shell ended or the page closed the session. */
+  onClose: (reason: string) => void;
 }
 
 export async function connectSession(options: ConnectOptions): Promise<SshHandle> {
@@ -128,7 +130,7 @@ export async function connectSession(options: ConnectOptions): Promise<SshHandle
           return options.isTrustedFingerprint(fingerprint);
         },
         onData: options.onData,
-        onClose: options.onClose,
+        onClose: (reason) => options.onClose(reason ?? ""),
       },
     );
   } catch (error) {

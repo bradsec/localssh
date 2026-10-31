@@ -36,7 +36,11 @@ any host and port through it.
 
 A rejected upgrade returns `403`. A target rejected after the connect frame
 closes the socket with code `1008` and the reason `target not allowed`; the
-relay log names the rejected host and port.
+relay log names the rejected host and port. A target that cannot be dialled
+closes the socket with code `1011` and one of these reasons, which the app turns
+into a recovery step: `target host not found`, `target connection refused`,
+`target connection timeout`, `target host unreachable`, or
+`target connection error`.
 
 ## Flow control
 

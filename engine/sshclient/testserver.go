@@ -19,6 +19,9 @@ type TestServer struct {
 	// WithholdRequestReplies makes sessions ignore channel requests, like a
 	// server that stalls after authentication.
 	WithholdRequestReplies atomic.Bool
+	// ExitAfterShell makes a shell report exit status 0 and close at once,
+	// like a remote shell whose user typed exit.
+	ExitAfterShell atomic.Bool
 
 	listener net.Listener
 	config   *ssh.ServerConfig
@@ -94,14 +97,14 @@ func (s *TestServer) handleConn(netConn net.Conn) {
 			}()
 			continue
 		}
-		go handleSession(channel, requests)
+		go handleSession(channel, requests, s.ExitAfterShell.Load())
 	}
 }
 
 // handleSession implements just enough of the session channel protocol to
 // prove PTY I/O round-trips correctly: pty-req, shell, window-change. Once a
 // shell is requested it echoes whatever it reads back to the client.
-func handleSession(channel ssh.Channel, requests <-chan *ssh.Request) {
+func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, exitAfterShell bool) {
 	defer channel.Close()
 	for req := range requests {
 		switch req.Type {
@@ -109,6 +112,10 @@ func handleSession(channel ssh.Channel, requests <-chan *ssh.Request) {
 			req.Reply(true, nil)
 		case "shell":
 			req.Reply(true, nil)
+			if exitAfterShell {
+				channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+				return
+			}
 			go echoLoop(channel)
 		default:
 			req.Reply(false, nil)

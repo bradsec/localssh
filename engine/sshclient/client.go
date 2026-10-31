@@ -29,6 +29,11 @@ type Session struct {
 	conn    ssh.Conn
 	client  *ssh.Client
 	channel ssh.Channel
+	// exited records an exit-status or exit-signal from the server, which is
+	// how a shell that ended on its own differs from a dropped connection.
+	exited *atomic.Bool
+	// requestsDone closes once every channel request has been read.
+	requestsDone chan struct{}
 }
 
 // Client returns the underlying *ssh.Client, for opening additional
@@ -92,7 +97,19 @@ func Connect(ctx context.Context, conn net.Conn, hostPort, username, password st
 		}
 		return nil, fmt.Errorf("open session channel: %w", err)
 	}
-	go ssh.DiscardRequests(requests)
+	exited := new(atomic.Bool)
+	requestsDone := make(chan struct{})
+	go func() {
+		defer close(requestsDone)
+		for req := range requests {
+			if req.Type == "exit-status" || req.Type == "exit-signal" {
+				exited.Store(true)
+			}
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}()
 
 	if !canceled.CompareAndSwap(false, true) {
 		// The watcher already won: ctx was canceled at essentially the same
@@ -103,7 +120,13 @@ func Connect(ctx context.Context, conn net.Conn, hostPort, username, password st
 		return nil, ctx.Err()
 	}
 
-	return &Session{conn: sshConn, client: client, channel: channel}, nil
+	return &Session{
+		conn:         sshConn,
+		client:       client,
+		channel:      channel,
+		exited:       exited,
+		requestsDone: requestsDone,
+	}, nil
 }
 
 // RequestPTY asks the remote to allocate a pseudo-terminal of the given
@@ -193,6 +216,15 @@ func (s *Session) Write(p []byte) (int, error) { return s.channel.Write(p) }
 // Servers that send it even after accepting a PTY are unsupported and can
 // stall when unread extended data exhausts the shared channel window.
 func (s *Session) Read(p []byte) (int, error) { return s.channel.Read(p) }
+
+// ExitReported reports whether the server announced the end of the shell with
+// an exit status or signal (RFC 4254 section 6.10) before the channel closed.
+// Call it after Close: it waits until every request has been read, which only
+// a closed channel or connection guarantees.
+func (s *Session) ExitReported() bool {
+	<-s.requestsDone
+	return s.exited.Load()
+}
 
 func (s *Session) Close() error {
 	return errors.Join(s.channel.Close(), s.conn.Close())

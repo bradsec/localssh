@@ -243,3 +243,58 @@ func TestRequestPTYGivesUpWhenTheServerNeverReplies(t *testing.T) {
 		t.Fatal("RequestPTY waited past its deadline for a reply that never came")
 	}
 }
+
+// connectWithShell opens a PTY shell on a fresh connection to server and
+// returns the session with the TCP connection beneath it.
+func connectWithShell(t *testing.T, server *TestServer) (*Session, net.Conn) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", server.Addr, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	accept := func(string, HostKeyFingerprint) error { return nil }
+	session, err := Connect(t.Context(), conn, server.Addr, "tester", "s3cret", accept)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if err := session.RequestPTY(t.Context(), 80, 24); err != nil {
+		t.Fatalf("request pty: %v", err)
+	}
+	return session, conn
+}
+
+func TestExitReportedAfterTheShellExits(t *testing.T) {
+	server, err := NewTestServer("tester", "s3cret")
+	if err != nil {
+		t.Fatalf("start test server: %v", err)
+	}
+	defer server.Close()
+	server.ExitAfterShell.Store(true)
+
+	session, _ := connectWithShell(t, server)
+	if _, err := session.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("read after exit: got %v, want EOF", err)
+	}
+	_ = session.Close()
+	if !session.ExitReported() {
+		t.Fatal("a shell that sent exit-status must count as a clean exit")
+	}
+}
+
+func TestExitNotReportedWhenTheConnectionDrops(t *testing.T) {
+	server, err := NewTestServer("tester", "s3cret")
+	if err != nil {
+		t.Fatalf("start test server: %v", err)
+	}
+	defer server.Close()
+
+	session, conn := connectWithShell(t, server)
+	_ = conn.Close()
+	if _, err := session.Read(make([]byte, 1)); err == nil {
+		t.Fatal("read after drop: want an error")
+	}
+	_ = session.Close()
+	if session.ExitReported() {
+		t.Fatal("a dropped connection must not count as a clean exit")
+	}
+}

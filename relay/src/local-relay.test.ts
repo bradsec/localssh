@@ -51,6 +51,74 @@ describe("local relay", () => {
     await closeLocalRelay(wss);
   });
 
+  // The engine maps these reasons to a recovery step, so each target failure
+  // must keep a distinct, stable reason that never echoes the client's host.
+  it.each([
+    ["ENOTFOUND", "target host not found"],
+    ["EAI_AGAIN", "target host not found"],
+    ["ECONNREFUSED", "target connection refused"],
+    ["ETIMEDOUT", "target connection timeout"],
+    ["EHOSTUNREACH", "target host unreachable"],
+    ["ENETUNREACH", "target host unreachable"],
+    ["ECONNRESET", "target connection error"],
+  ])("closes with a typed reason when the target fails with %s", async (code, reason) => {
+    const socket = new Socket();
+    const wss = startLocalRelay({ port: 0, targetConnector: () => socket });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`);
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    const closed = new Promise<[number, string]>((resolve) =>
+      client.once("close", (closeCode, closeReason) => resolve([closeCode, closeReason.toString()])),
+    );
+    client.send(encodeConnectFrame({ host: "127.0.0.1", port: 22 }));
+    await vi.waitFor(() => expect(socket.listenerCount("error")).toBeGreaterThan(0));
+    socket.destroy(Object.assign(new Error("simulated"), { code }));
+
+    expect(await closed).toEqual([1011, reason]);
+    await closeLocalRelay(wss);
+  });
+
+  it("names a target deadline in the close reason", async () => {
+    const socket = new Socket();
+    const wss = startLocalRelay({
+      port: 0,
+      targetConnectTimeoutMs: 10,
+      targetConnector: () => socket,
+    });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`);
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    const closed = new Promise<string>((resolve) =>
+      client.once("close", (_code, reason) => resolve(reason.toString())),
+    );
+    client.send(encodeConnectFrame({ host: "127.0.0.1", port: 22 }));
+
+    expect(await closed).toBe("target connection timeout");
+    await closeLocalRelay(wss);
+  });
+
+  it("reports a refused target port through a real connection", async () => {
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const closedPort = (probe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const wss = startLocalRelay({ port: 0 });
+    await new Promise<void>((resolve) => wss.once("listening", resolve));
+    const relayPort = (wss.address() as AddressInfo).port;
+    const client = new WebSocket(`ws://127.0.0.1:${relayPort}`);
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    const closed = new Promise<string>((resolve) =>
+      client.once("close", (_code, reason) => resolve(reason.toString())),
+    );
+    client.send(encodeConnectFrame({ host: "127.0.0.1", port: closedPort }));
+
+    expect(await closed).toBe("target connection refused");
+    await closeLocalRelay(wss);
+  });
+
   it("closes active clients during bounded shutdown", async () => {
     const wss = startLocalRelay({ port: 0 });
     await new Promise<void>((resolve) => wss.once("listening", resolve));

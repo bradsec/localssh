@@ -23,6 +23,29 @@ const MAX_SESSIONS = 256;
 const TARGET_CONNECT_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 
+/**
+ * The close reason for a target that failed before or during the session.
+ * The browser engine maps these exact strings to a recovery step, so keep them
+ * stable. They never include the client's host, which belongs in the log.
+ */
+function targetFailureReason(error: NodeJS.ErrnoException, timedOut: boolean): string {
+  if (timedOut) return "target connection timeout";
+  switch (error.code) {
+    case "ENOTFOUND":
+    case "EAI_AGAIN":
+      return "target host not found";
+    case "ECONNREFUSED":
+      return "target connection refused";
+    case "ETIMEDOUT":
+      return "target connection timeout";
+    case "EHOSTUNREACH":
+    case "ENETUNREACH":
+      return "target host unreachable";
+    default:
+      return "target connection error";
+  }
+}
+
 export interface LocalRelayOptions {
   port: number;
   /**
@@ -186,7 +209,9 @@ export function startLocalRelay({
 
       const socket = targetConnector({ host: frame.host, port: frame.port });
       target = socket;
+      let timedOut = false;
       const connectTimer = setTimeout(() => {
+        timedOut = true;
         socket.destroy(new Error("target connection timeout"));
       }, targetConnectTimeoutMs);
       socket.once("connect", () => clearTimeout(connectTimer));
@@ -214,7 +239,9 @@ export function startLocalRelay({
         clearTimeout(connectTimer);
         ws.close();
       });
-      socket.on("error", () => ws.close(1011, "target connection error"));
+      socket.on("error", (error: NodeJS.ErrnoException) =>
+        ws.close(1011, targetFailureReason(error, timedOut)),
+      );
     });
 
     ws.on("close", () => {

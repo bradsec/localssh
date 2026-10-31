@@ -139,10 +139,13 @@ func connect(relayWsURL, host, port, username, password string, callbacks, resol
 
 	bridge := &sessionBridge{
 		cancel:    cancel,
+		conn:      conn,
 		session:   session,
 		callbacks: callbacks,
 	}
-	bridge.writes = writequeue.New(session, maxQueuedInputBytes, func(error) { _ = bridge.close() })
+	bridge.writes = writequeue.New(session, maxQueuedInputBytes, func(error) {
+		_ = bridge.close(bridge.lostReason)
+	})
 	handle := bridge.handle()
 	resolve.Invoke(handle)
 	go bridge.read()
@@ -166,6 +169,7 @@ func callJS(object js.Value, method string, args ...any) (value js.Value, err er
 
 type sessionBridge struct {
 	cancel    context.CancelFunc
+	conn      *wsconn.Conn
 	session   *sshclient.Session
 	callbacks js.Value
 	// writes carries input to the session off the callback goroutine; see
@@ -211,7 +215,7 @@ func (b *sessionBridge) handle() js.Value {
 		return nil
 	})
 	closeSession := js.FuncOf(func(this js.Value, args []js.Value) any {
-		if err := b.close(); err != nil {
+		if err := b.close(nil); err != nil {
 			return err.Error()
 		}
 		return nil
@@ -233,23 +237,42 @@ func (b *sessionBridge) read() {
 			jsBuf := js.Global().Get("Uint8Array").New(n)
 			js.CopyBytesToJS(jsBuf, buf[:n])
 			if _, callbackErr := callJS(b.callbacks, "onData", jsBuf); callbackErr != nil {
-				_ = b.close()
+				_ = b.close(nil)
 				return
 			}
 		}
 		if err != nil {
-			_ = b.close()
+			_ = b.close(b.lostReason)
 			return
 		}
 	}
 }
 
-func (b *sessionBridge) close() error {
+// lostReason names why a session ended that the page did not close. A shell
+// that reported its exit ended cleanly and gets no reason; anything else lost
+// the connection, and the relay's close reason says where.
+func (b *sessionBridge) lostReason() string {
+	if b.session.ExitReported() {
+		return ""
+	}
+	if closeErr := b.conn.PeerClose(); closeErr != nil {
+		return "connection lost: " + closeErr.Error()
+	}
+	return "connection lost"
+}
+
+// close ends the session and calls onClose with the text reason returns, or
+// with "" when reason is nil. reason runs after the session is closed.
+func (b *sessionBridge) close(reason func() string) error {
 	b.closeOnce.Do(func() {
 		b.cancel()
 		b.writes.Close()
 		b.closeErr = b.session.Close()
-		if _, err := callJS(b.callbacks, "onClose"); err != nil {
+		message := ""
+		if reason != nil {
+			message = reason()
+		}
+		if _, err := callJS(b.callbacks, "onClose", message); err != nil {
 			b.closeErr = errors.Join(b.closeErr, err)
 		}
 		for _, fn := range b.funcs {

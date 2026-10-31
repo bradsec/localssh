@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall/js"
 	"time"
 )
@@ -28,6 +29,24 @@ var errWebSocketConnect = errors.New(
 	"could not reach the relay: it may be down, or it refused this page's origin " +
 		"(check ALLOWED_ORIGINS in the relay configuration, and the relay log for the reason)",
 )
+
+// CloseError reports a WebSocket that the relay or the network closed after
+// it opened. The relay names target failures in the close reason, and the
+// page maps that reason to a recovery step. It wraps io.EOF so a reader that
+// treats the end of the stream as EOF keeps doing so.
+type CloseError struct {
+	Code   int
+	Reason string
+}
+
+func (e *CloseError) Error() string {
+	if e.Reason == "" {
+		return fmt.Sprintf("relay connection closed (code %d)", e.Code)
+	}
+	return fmt.Sprintf("relay connection closed: %s (code %d)", e.Reason, e.Code)
+}
+
+func (e *CloseError) Unwrap() error { return io.EOF }
 
 // Conn implements net.Conn over a browser/Node WebSocket, so sshclient.Connect
 // can dial through it exactly as it would a real TCP connection. On open, it
@@ -47,6 +66,10 @@ type Conn struct {
 	writeMu   sync.Mutex
 	closeCh   chan struct{}
 	closeOnce sync.Once
+	// closedLocally is set before this side closes the socket, so the close
+	// event that follows is not mistaken for the peer's.
+	closedLocally atomic.Bool
+	peerClose     atomic.Pointer[CloseError]
 
 	deadlineMu      sync.Mutex
 	readDeadline    time.Time
@@ -124,6 +147,7 @@ func Dial(ctx context.Context, wsURL, host, port string) (*Conn, error) {
 		c.queueMu.Lock()
 		if len(buf) > maxBufferedReadBytes-c.bufferedReadBytes {
 			c.queueMu.Unlock()
+			c.closedLocally.Store(true)
 			c.signalClosed()
 			// A page may only close with 1000 or 3000..4999; any other code,
 			// including 1009 "message too big", makes the browser throw, and a
@@ -142,6 +166,12 @@ func Dial(ctx context.Context, wsURL, host, port string) (*Conn, error) {
 	})
 	c.addEventListener("close", func(this js.Value, args []js.Value) any {
 		sendDialResult(dialResult, errWebSocketConnect)
+		if !c.closedLocally.Load() && len(args) > 0 {
+			c.peerClose.Store(&CloseError{
+				Code:   args[0].Get("code").Int(),
+				Reason: args[0].Get("reason").String(),
+			})
+		}
 		c.signalClosed()
 		return nil
 	})
@@ -230,6 +260,9 @@ func (c *Conn) Read(p []byte) (int, error) {
 			hasQueuedData := len(c.queue) > 0
 			c.queueMu.Unlock()
 			if !hasQueuedData {
+				if closeErr := c.peerClose.Load(); closeErr != nil {
+					return 0, closeErr
+				}
 				return 0, io.EOF
 			}
 		default:
@@ -324,7 +357,12 @@ func (c *Conn) sendText(message string) (err error) {
 	return nil
 }
 
+// PeerClose returns how the relay or network closed the socket, or nil when it
+// is still open or this side closed it.
+func (c *Conn) PeerClose() *CloseError { return c.peerClose.Load() }
+
 func (c *Conn) Close() (err error) {
+	c.closedLocally.Store(true)
 	c.signalClosed()
 
 	defer func() {
