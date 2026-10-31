@@ -74,4 +74,15 @@ describe("describeConnectionFailure", () => {
     // text; the mapping keys on the exact reason phrases.
     expect(describeConnectionFailure('invalid port "refused"').kind).toBe("unknown");
   });
+
+  it.each([
+    ["private key could not be read", "key-invalid"],
+    ["private key format not supported", "key-unsupported"],
+    ["key passphrase did not unlock the key", "key-passphrase"],
+    ["private key rejected by server: unable to authenticate", "key-rejected"],
+  ])("maps %s to %s", (raw, kind) => {
+    const failure = describeConnectionFailure(raw);
+    expect(failure.kind).toBe(kind);
+    expect(failure.topic).toBe("troubleshooting");
+  });
 });

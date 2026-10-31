@@ -71,3 +71,40 @@ test("connects through the relay, trusts the host key, and echoes input", async 
 
   await expect(page.locator(".xterm-rows")).toContainText("hello", { timeout: 5_000 });
 });
+
+test("connects with a private-key file through the relay", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+  await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Private key$/i).check();
+  await page.getByLabel(/^Private-key file$/i).setInputFiles(process.env.E2E_KEY_PATH!);
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await expect(page.getByRole("alertdialog", { name: /verify host key/i })).toBeVisible();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await page.locator(".xterm-screen").click();
+  await page.keyboard.type("key-login");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".xterm-rows")).toContainText("key-login");
+});
+
+test("reports wrong passphrase and rejected key", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+  await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Private key$/i).check();
+  await page.getByLabel(/^Private-key file$/i).setInputFiles(process.env.E2E_REJECTED_KEY_PATH!);
+  await page.getByLabel(/^Key passphrase$/i).fill("wrong");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await expect(page.getByText(/key passphrase did not unlock this key/i)).toBeVisible();
+  await page.getByLabel(/^Private-key file$/i).setInputFiles(process.env.E2E_REJECTED_KEY_PATH!);
+  await page.getByLabel(/^Key passphrase$/i).fill("secret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await expect(page.getByRole("alertdialog", { name: /verify host key/i })).toBeVisible();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  await expect(page.getByText("The server did not accept this key.")).toBeVisible();
+});

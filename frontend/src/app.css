@@ -920,8 +920,30 @@ body:has(.app-shell--connect) {
 }
 
 .connect-form__username,
-.connect-form__password {
+.connect-form__password,
+.connect-form__auth,
+.connect-form__key,
+.connect-form > p {
   grid-column: 1 / -1;
+}
+
+.connect-form__auth {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.connect-form__auth legend {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+.connect-form__auth label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .connect-form__remember {
@@ -950,7 +972,8 @@ body:has(.app-shell--connect) {
 /* 16px is a hard floor, not a style choice: iOS Safari zooms the page when a
    focused field is smaller, and never zooms back out. */
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-width: 0;
   padding: 9px 11px;
@@ -959,6 +982,11 @@ body:has(.app-shell--connect) {
   color: var(--text);
   background: var(--surface-raised);
   font-size: max(16px, 0.88rem);
+}
+
+.field textarea {
+  min-height: 96px;
+  font-family: var(--mono);
 }
 
 .field input[type="number"] {
@@ -1861,6 +1889,25 @@ body:has(.app-shell--connect) {
   .dialog-actions .button {
     width: 100%;
     white-space: normal;
+  }
+}
+
+@media (max-width: 360px) {
+  .connect-panel__intro {
+    padding: 12px 18px;
+  }
+
+  .connect-kicker {
+    margin-bottom: 4px;
+  }
+
+  .connect-panel__intro > p.connect-version {
+    padding-top: 4px;
+  }
+
+  .connect-form {
+    gap: 8px 9px;
+    padding: 10px 18px 14px;
   }
 }
 

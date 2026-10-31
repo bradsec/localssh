@@ -15,7 +15,7 @@ declare global {
       host: string,
       port: string,
       username: string,
-      password: string | { fromVault: string },
+      password: string | { fromVault: string } | { privateKey: Uint8Array; passphrase: string },
       callbacks: {
         onHostKey: (fingerprint: string) => boolean;
         onData: (chunk: Uint8Array) => void;
@@ -94,7 +94,10 @@ export class HostKeyRejectedError extends Error {
  * than passed: it lives in the engine and never enters JavaScript, where a
  * string could not be wiped afterwards.
  */
-export type ConnectPassword = { kind: "typed"; value: string } | { kind: "vault"; entryId: string };
+export type ConnectPassword =
+  | { kind: "typed"; value: string }
+  | { kind: "vault"; entryId: string }
+  | { kind: "key"; privateKey: Uint8Array; passphrase: string };
 
 export interface ConnectOptions {
   relayWsUrl: string;
@@ -111,19 +114,21 @@ export interface ConnectOptions {
 }
 
 export async function connectSession(options: ConnectOptions): Promise<SshHandle> {
-  await loadEngineImpl.current();
   const hostPort = `${options.host}:${options.port}`;
   let capturedFingerprint = "";
 
   try {
-    return await window.sshConnect(
+    await loadEngineImpl.current();
+    const handle = await window.sshConnect(
       options.relayWsUrl,
       options.host,
       String(options.port),
       options.username,
       options.password.kind === "typed"
         ? options.password.value
-        : { fromVault: options.password.entryId },
+        : options.password.kind === "vault"
+          ? { fromVault: options.password.entryId }
+          : { privateKey: options.password.privateKey, passphrase: options.password.passphrase },
       {
         onHostKey: (fingerprint) => {
           capturedFingerprint = fingerprint;
@@ -133,6 +138,8 @@ export async function connectSession(options: ConnectOptions): Promise<SshHandle
         onClose: (reason) => options.onClose(reason ?? ""),
       },
     );
+    if (options.password.kind === "key") options.password.privateKey.fill(0);
+    return handle;
   } catch (error) {
     // The Go SSH stack wraps the rejection sentinel during the handshake, so
     // the Promise rejects with a longer string containing this message.
@@ -143,6 +150,7 @@ export async function connectSession(options: ConnectOptions): Promise<SshHandle
     ) {
       throw new HostKeyRejectedError(hostPort, capturedFingerprint);
     }
+    if (options.password.kind === "key") options.password.privateKey.fill(0);
     throw error;
   }
 }

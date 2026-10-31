@@ -29,6 +29,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     paragraphs: [
       "Enter the server hostname or IP address, SSH port, username, and password. Select Connect to server. Port 22 is the usual SSH port.",
       "You can connect without setting up saved hosts. A password you type is kept for this connection only.",
+      "For key-only servers, choose Private key. Select an OpenSSH or PEM Ed25519, ECDSA, or RSA private-key file, or paste its contents. Enter its passphrase if needed.",
     ],
   },
   {
@@ -83,6 +84,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     paragraphs: [
       "If the relay cannot be reached, check that localssh is running and that you opened the right address. If you run the relay, check its logs for a refused origin, host, or port.",
       "If the SSH login fails, check the host, port, username, and password. Ask the server administrator whether the server accepts password login. If a host key changed, verify the new fingerprint before continuing.",
+      "If a private key cannot be read, check its format and passphrase. If the server rejects it, check that its public key is in ~/.ssh/authorized_keys on the server, or use password login.",
     ],
   },
   {
@@ -92,6 +94,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     paragraphs: [
       "The SSH engine runs in your browser. The relay connects your browser to the server because browsers cannot open raw TCP connections. It carries encrypted SSH traffic and cannot read your password or terminal output.",
       "Saved hosts and optional saved passwords are encrypted under your master password in this browser. The SSH server receives your login credentials through the encrypted SSH connection. localssh has no application account or credential server. This design has not been independently audited.",
+      "Private keys and key passphrases are used for the current connection only. They are not saved in browser storage or sent to the relay.",
     ],
   },
   {

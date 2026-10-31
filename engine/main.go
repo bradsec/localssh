@@ -15,6 +15,7 @@ import (
 	"engine/sshclient"
 	"engine/writequeue"
 	"engine/wsconn"
+	"golang.org/x/crypto/ssh"
 )
 
 func main() {
@@ -23,8 +24,8 @@ func main() {
 	select {} // keep the WASM program alive to service callbacks
 }
 
-// sshConnect(relayWsUrl, host, port, username, password, callbacks) -> Promise<handle>
-// password: a string, or { fromVault: "<entryId>" } to use a saved password
+// sshConnect(relayWsUrl, host, port, username, auth, callbacks) -> Promise<handle>
+// auth: a password string, { fromVault: "<entryId>" }, or { privateKey: Uint8Array, passphrase: string }
 // callbacks: { onHostKey(fingerprint) -> bool, onData(Uint8Array), onClose() }
 // handle: { write(Uint8Array), resize(cols, rows), close() }
 func sshConnect(this js.Value, args []js.Value) any {
@@ -39,14 +40,14 @@ func sshConnect(this js.Value, args []js.Value) any {
 		host := args[1].String()
 		port := args[2].String()
 		username := args[3].String()
-		password, err := resolvePassword(args[4])
+		password, key, passphrase, err := resolveAuth(args[4])
 		if err != nil {
 			reject.Invoke(err.Error())
 			return nil
 		}
 		callbacks := args[5]
 
-		go connect(relayWsURL, host, port, username, password, callbacks, resolve, reject)
+		go connect(relayWsURL, host, port, username, password, key, passphrase, callbacks, resolve, reject)
 		return nil
 	})
 
@@ -55,20 +56,31 @@ func sshConnect(this js.Value, args []js.Value) any {
 	return promise
 }
 
-// resolvePassword accepts either a typed password or a reference into the
-// unlocked vault. A saved password is read here and never handed to the page.
-func resolvePassword(arg js.Value) (string, error) {
+// resolveAuth accepts a typed password, a vault reference, or a private key.
+// A saved password is read here and never handed to the page.
+func resolveAuth(arg js.Value) (string, []byte, []byte, error) {
 	switch arg.Type() {
 	case js.TypeString:
-		return arg.String(), nil
+		return arg.String(), nil, nil, nil
 	case js.TypeObject:
+		privateKey := arg.Get("privateKey")
+		if privateKey.Type() != js.TypeUndefined {
+			passphrase := arg.Get("passphrase")
+			if !privateKey.InstanceOf(js.Global().Get("Uint8Array")) || passphrase.Type() != js.TypeString {
+				return "", nil, nil, errors.New("key auth requires a Uint8Array privateKey and string passphrase")
+			}
+			key := make([]byte, privateKey.Get("byteLength").Int())
+			js.CopyBytesToGo(key, privateKey)
+			return "", key, []byte(passphrase.String()), nil
+		}
 		entryID := arg.Get("fromVault")
 		if entryID.Type() != js.TypeString {
-			return "", errors.New("password object must carry a fromVault string")
+			return "", nil, nil, errors.New("password object must carry a fromVault string")
 		}
-		return vaultPassword(entryID.String())
+		password, err := vaultPassword(entryID.String())
+		return password, nil, nil, err
 	default:
-		return "", errors.New("password must be a string or a fromVault object")
+		return "", nil, nil, errors.New("auth must be a password string, fromVault object, or privateKey object")
 	}
 }
 
@@ -103,8 +115,20 @@ const connectTimeout = 30 * time.Second
 // limit.
 const maxQueuedInputBytes = 8 << 20
 
-func connect(relayWsURL, host, port, username, password string, callbacks, resolve, reject js.Value) {
+func connect(relayWsURL, host, port, username, password string, key, passphrase []byte, callbacks, resolve, reject js.Value) {
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	var signer ssh.Signer
+	if key != nil {
+		var err error
+		signer, err = sshclient.ParsePrivateKey(key, passphrase)
+		clear(key)
+		clear(passphrase)
+		if err != nil {
+			cancel()
+			reject.Invoke(err.Error())
+			return
+		}
+	}
 
 	conn, err := wsconn.Dial(ctx, relayWsURL, host, port)
 	if err != nil {
@@ -124,7 +148,12 @@ func connect(relayWsURL, host, port, username, password string, callbacks, resol
 		return nil
 	}
 
-	session, err := sshclient.Connect(ctx, conn, net.JoinHostPort(host, port), username, password, verify)
+	var session *sshclient.Session
+	if signer != nil {
+		session, err = sshclient.ConnectWithKey(ctx, conn, net.JoinHostPort(host, port), username, signer, verify)
+	} else {
+		session, err = sshclient.Connect(ctx, conn, net.JoinHostPort(host, port), username, password, verify)
+	}
 	if err != nil {
 		cancel()
 		rejectWithCleanup(reject, err, conn.Close())

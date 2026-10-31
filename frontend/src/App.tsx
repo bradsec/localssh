@@ -186,7 +186,10 @@ export function App() {
         setStatus({ kind: "connected" });
         requestAnimationFrame(() => terminalControlsRef.current?.focus());
       } catch (error) {
-        if (connectionAttemptRef.current !== attempt) return;
+        if (connectionAttemptRef.current !== attempt) {
+          if (values.password.kind === "key") values.password.privateKey.fill(0);
+          return;
+        }
         if (error instanceof HostKeyRejectedError) {
           const previousFingerprint = knownHosts.get(hostPort);
           setStatus({
@@ -198,6 +201,7 @@ export function App() {
             pending: values,
           });
         } else {
+          if (values.password.kind === "key") values.password.privateKey.fill(0);
           setStatus({
             kind: "error",
             message: error instanceof Error ? error.message : String(error),
@@ -214,6 +218,7 @@ export function App() {
       await trustHostKey(status.hostPort, status.fingerprint);
       await attemptConnect(status.pending);
     } catch (error) {
+      if (status.pending.password.kind === "key") status.pending.password.privateKey.fill(0);
       setStatus({
         kind: "error",
         message: error instanceof Error ? error.message : String(error),
@@ -345,7 +350,11 @@ export function App() {
             changed={status.changed}
             previousFingerprint={status.previousFingerprint}
             onTrust={trustAndRetry}
-            onCancel={() => setStatus({ kind: "idle" })}
+            onCancel={() => {
+              if (status.pending.password.kind === "key")
+                status.pending.password.privateKey.fill(0);
+              setStatus({ kind: "idle" });
+            }}
           />
         )}
       </main>

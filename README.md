@@ -1,7 +1,7 @@
 # localssh
 
 An SSH client that runs in the browser. The SSH implementation is compiled to
-WebAssembly and runs in the page, so the handshake, password authentication,
+WebAssembly and runs in the page, so the handshake, authentication,
 and host-key verification all happen on your device. The relay in between moves
 encrypted bytes and cannot read the session.
 
@@ -15,7 +15,7 @@ others discover the project.
 ## Features
 
 - **Browser-native SSH.** The Go SSH engine runs as WebAssembly in the tab.
-  Password authentication, host-key verification, and terminal I/O stay between
+  Password or private-key authentication, host-key verification, and terminal I/O stay between
   the browser and the SSH server.
 - **Encrypted saved hosts.** The optional [address book](#address-book) saves a
   nickname, host, port, username, and optionally a password. The entire address
@@ -267,6 +267,11 @@ What this design does and does not protect you from:
 - **Typed passwords stay in memory.** A password you type lives in React state
   for the life of the connection and is never written to storage or sent to any
   origin server.
+- **Private keys stay on your device.** Select a file or paste an OpenSSH or PEM
+  Ed25519, ECDSA, or RSA key. Enter its passphrase if needed. The key and
+  passphrase are used for this connection only, never saved in the address book
+  or sent to the relay. A host-key prompt can reuse the key after you trust the
+  server; cancelling that prompt discards it.
 - **Saved passwords are encrypted on your device.** The optional address book
   seals every saved host under a master password, using Argon2id and
   XChaCha20-Poly1305 inside the WebAssembly engine. A saved password is never

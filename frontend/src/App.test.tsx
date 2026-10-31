@@ -160,6 +160,23 @@ describe("App", () => {
     expect(await screen.findByText(/SHA256:deadbeef/)).toBeInTheDocument();
   });
 
+  it("wipes a pending private key when host-key trust is cancelled", async () => {
+    vi.mocked(engine.connectSession).mockRejectedValueOnce(
+      new engine.HostKeyRejectedError("10.0.0.5:22", "SHA256:deadbeef"),
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/^host$/i), "10.0.0.5");
+    await user.type(screen.getByLabelText(/^username$/i), "admin");
+    await user.click(screen.getByLabelText(/^private key$/i));
+    await user.type(screen.getByLabelText(/or paste the private key/i), "test-key");
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    const key = vi.mocked(engine.connectSession).mock.calls[0]?.[0].password;
+    expect(key).toMatchObject({ kind: "key" });
+    await user.click(await screen.findByRole("button", { name: /^cancel$/i }));
+    if (key?.kind === "key") expect(Array.from(key.privateKey)).toEqual(Array(8).fill(0));
+  });
+
   it("stores an accepted host key and retries the connection", async () => {
     vi.mocked(knownHostsStore.loadKnownHosts)
       .mockResolvedValueOnce(new Map())

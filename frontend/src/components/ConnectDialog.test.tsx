@@ -31,6 +31,37 @@ function vaultApi(overrides: Partial<VaultApi> = {}): VaultApi {
 beforeEach(() => localStorage.clear());
 
 describe("ConnectDialog", () => {
+  it("connects with a pasted private key", async () => {
+    const onConnect = vi.fn();
+    render(<ConnectDialog vault={vaultApi()} onConnect={onConnect} disabled={false} />);
+    await userEvent.type(screen.getByLabelText(/^host$/i), "10.0.0.9");
+    await userEvent.type(screen.getByLabelText(/^username$/i), "pi");
+    await userEvent.click(screen.getByLabelText(/^private key$/i));
+    await userEvent.type(screen.getByLabelText(/or paste the private key/i), "key-data");
+    await userEvent.type(screen.getByLabelText(/^key passphrase$/i), "secret");
+    await userEvent.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    expect(onConnect).toHaveBeenCalledWith({
+      host: "10.0.0.9",
+      port: 22,
+      username: "pi",
+      password: {
+        kind: "key",
+        privateKey: new TextEncoder().encode("key-data"),
+        passphrase: "secret",
+      },
+    });
+  });
+
+  it("requires a key file or pasted key", async () => {
+    const onConnect = vi.fn();
+    render(<ConnectDialog vault={vaultApi()} onConnect={onConnect} disabled={false} />);
+    await userEvent.type(screen.getByLabelText(/^host$/i), "10.0.0.9");
+    await userEvent.type(screen.getByLabelText(/^username$/i), "pi");
+    await userEvent.click(screen.getByLabelText(/^private key$/i));
+    await userEvent.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/select a private-key file or paste/i);
+    expect(onConnect).not.toHaveBeenCalled();
+  });
   it("connects with a typed password", async () => {
     const onConnect = vi.fn();
     render(<ConnectDialog vault={vaultApi()} onConnect={onConnect} disabled={false} />);

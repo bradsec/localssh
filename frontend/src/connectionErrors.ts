@@ -21,6 +21,10 @@ export type ConnectionFailureKind =
   | "timeout"
   | "refused"
   | "auth"
+  | "key-invalid"
+  | "key-unsupported"
+  | "key-passphrase"
+  | "key-rejected"
   | "host-key"
   | "connection-lost"
   | "engine-load"
@@ -82,6 +86,27 @@ const VARIANTS: Record<ConnectionFailureKind, Variant> = {
     recovery: "Check the username and password, then try again.",
     topic: "troubleshooting",
   },
+  "key-invalid": {
+    message: "This private key could not be read. Select a supported key file and try again.",
+    recovery: "Use an OpenSSH or PEM Ed25519, ECDSA, or RSA private key.",
+    topic: "troubleshooting",
+  },
+  "key-unsupported": {
+    message: "This key format is not supported. Select a supported private key format.",
+    recovery: "Supported formats: OpenSSH or PEM Ed25519, ECDSA, and RSA keys.",
+    topic: "troubleshooting",
+  },
+  "key-passphrase": {
+    message: "The key passphrase did not unlock this key. Check the passphrase and try again.",
+    recovery: "Enter the passphrase for this private key, then try again.",
+    topic: "troubleshooting",
+  },
+  "key-rejected": {
+    message: "The server did not accept this key.",
+    recovery:
+      "Check that its public key is in ~/.ssh/authorized_keys on the server, or use password login.",
+    topic: "troubleshooting",
+  },
   "host-key": {
     message: "The host key was not accepted, so the connection stopped.",
     recovery: "Check the host key with the server administrator, then connect again.",
@@ -108,6 +133,10 @@ const VARIANTS: Record<ConnectionFailureKind, Variant> = {
 // generic "relay connection closed", which ends every post-upgrade failure.
 const PATTERNS: [RegExp, ConnectionFailureKind][] = [
   [/host key rejected/, "host-key"],
+  [/private key rejected by server/, "key-rejected"],
+  [/private key format not supported/, "key-unsupported"],
+  [/key passphrase did not unlock the key/, "key-passphrase"],
+  [/private key could not be read/, "key-invalid"],
   [/unable to authenticate/, "auth"],
   [/target not allowed/, "target-not-allowed"],
   [/target host not found/, "host-not-found"],

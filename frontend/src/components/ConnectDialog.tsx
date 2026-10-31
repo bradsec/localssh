@@ -52,13 +52,50 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
   const [port, setPort] = useState(String(migrated?.port ?? 22));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [method, setMethod] = useState<"password" | "key">("password");
+  const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [pastedKey, setPastedKey] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [readingKey, setReadingKey] = useState(false);
+  const [keyError, setKeyError] = useState("");
+  const keyFileRef = useRef<HTMLInputElement>(null);
   const usernameRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   const storesAPassword = vault.entries.some((entry) => entry.hasPassword);
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (method === "key") {
+      if (!pastedKey && !keyFile) {
+        setKeyError("Select a private-key file or paste the private key.");
+        return;
+      }
+      setReadingKey(true);
+      setKeyError("");
+      try {
+        const privateKey = pastedKey
+          ? new TextEncoder().encode(pastedKey)
+          : new Uint8Array(await keyFile!.arrayBuffer());
+        onConnect({
+          host,
+          port: Number(port),
+          username,
+          password: { kind: "key", privateKey, passphrase },
+        });
+        setPastedKey("");
+        setPassphrase("");
+        setKeyFile(null);
+        if (keyFileRef.current) keyFileRef.current.value = "";
+      } catch {
+        setKeyError(
+          "This private key could not be read. Select a supported key file and try again.",
+        );
+      } finally {
+        setReadingKey(false);
+      }
+      return;
+    }
     onConnect({
       host,
       port: Number(port),
@@ -74,6 +111,7 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
     setPort(String(entry.port));
     setUsername(entry.username ?? "");
     setPassword("");
+    setMethod("password");
 
     if (entry.username && entry.hasPassword) {
       onConnect({
@@ -153,23 +191,84 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
             required
           />
         </label>
-        <label className="field connect-form__password">
-          <span>Password</span>
-          <input
-            ref={passwordRef}
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </label>
+        <fieldset className="connect-form__auth">
+          <legend>Authentication method</legend>
+          <label>
+            <input
+              type="radio"
+              name="auth-method"
+              checked={method === "password"}
+              onChange={() => setMethod("password")}
+            />
+            Password<span className="visually-hidden"> authentication</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="auth-method"
+              checked={method === "key"}
+              onChange={() => setMethod("key")}
+            />
+            Private key
+          </label>
+        </fieldset>
+        {method === "password" ? (
+          <label className="field connect-form__password">
+            <span>Password</span>
+            <input
+              ref={passwordRef}
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+        ) : (
+          <>
+            <label className="field connect-form__key">
+              <span>Private-key file</span>
+              <input
+                ref={keyFileRef}
+                type="file"
+                onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <p>
+              Select a private key from this device. localssh does not save the key or passphrase.
+            </p>
+            <p>Supported formats: OpenSSH or PEM Ed25519, ECDSA, and RSA keys.</p>
+            <label className="field connect-form__key">
+              <span>Or paste the private key</span>
+              <textarea
+                value={pastedKey}
+                onChange={(event) => setPastedKey(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <label className="field connect-form__key">
+              <span>Key passphrase</span>
+              <input
+                type="password"
+                value={passphrase}
+                onChange={(event) => setPassphrase(event.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            {keyError && <p role="alert">{keyError}</p>}
+          </>
+        )}
         <button
           className="button button--primary connect-form__submit"
           type="submit"
-          disabled={disabled}
+          disabled={disabled || readingKey}
         >
-          {disabled ? "Connecting to server..." : "Connect to server"}
+          {readingKey
+            ? "Reading private key..."
+            : disabled
+              ? "Connecting to server..."
+              : "Connect to server"}
         </button>
         {error}
       </form>

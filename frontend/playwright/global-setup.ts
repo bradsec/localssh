@@ -1,6 +1,8 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 
 const STARTUP_TIMEOUT_MS = 10_000;
@@ -108,6 +110,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const engineDir = path.resolve(frontendDir, "../engine");
   const relayDir = path.resolve(frontendDir, "../relay");
   const previousSshdAddress = process.env.E2E_SSHD_ADDR;
+  const keyDir = mkdtempSync(path.join(tmpdir(), "localssh-e2e-key-"));
+  const previousKeyPath = process.env.E2E_KEY_PATH;
+  const previousRejectedKeyPath = process.env.E2E_REJECTED_KEY_PATH;
 
   let sshd: ChildProcessWithoutNullStreams | undefined;
   let relay: ChildProcessWithoutNullStreams | undefined;
@@ -117,18 +122,32 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       await stopChild(relay, false);
     } finally {
       await stopChild(sshd, true);
+      rmSync(keyDir, { recursive: true, force: true });
       if (previousSshdAddress === undefined) {
         delete process.env.E2E_SSHD_ADDR;
       } else {
         process.env.E2E_SSHD_ADDR = previousSshdAddress;
       }
+      if (previousKeyPath === undefined) delete process.env.E2E_KEY_PATH;
+      else process.env.E2E_KEY_PATH = previousKeyPath;
+      if (previousRejectedKeyPath === undefined) delete process.env.E2E_REJECTED_KEY_PATH;
+      else process.env.E2E_REJECTED_KEY_PATH = previousRejectedKeyPath;
     }
   };
 
   try {
     execFileSync(path.join(engineDir, "build.sh"), { cwd: engineDir });
 
-    sshd = spawn(path.join(engineDir, "dist/testsshd"), ["tester", "s3cret"], {
+    const acceptedKey = path.join(keyDir, "accepted");
+    const rejectedKey = path.join(keyDir, "rejected");
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", acceptedKey]);
+    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "secret", "-f", rejectedKey]);
+    const authorizedKeys = path.join(keyDir, "authorized_keys");
+    writeFileSync(authorizedKeys, readFileSync(`${acceptedKey}.pub`));
+    process.env.E2E_KEY_PATH = acceptedKey;
+    process.env.E2E_REJECTED_KEY_PATH = rejectedKey;
+
+    sshd = spawn(path.join(engineDir, "dist/testsshd"), ["tester", "s3cret", authorizedKeys], {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const sshdStderr = captureStderr(sshd);
