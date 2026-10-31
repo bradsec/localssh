@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -249,7 +250,11 @@ func (h *testSFTPFiles) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		}
 		return list, nil
 	}
-	info, err := os.Stat(path)
+	stat := os.Stat
+	if r.Method == "Lstat" {
+		stat = os.Lstat
+	}
+	info, err := stat(path)
 	if err != nil {
 		return nil, err
 	}
@@ -264,13 +269,20 @@ func (h *testSFTPFiles) Filecmd(r *sftp.Request) error {
 	switch r.Method {
 	case "Remove":
 		return os.Remove(name)
+	case "Setstat":
+		if r.AttrFlags().Permissions {
+			return os.Chmod(name, r.Attributes().FileMode()&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky))
+		}
+		return nil
 	case "Rename":
 		target, err := h.path(r.Target)
 		if err != nil {
 			return err
 		}
 		if _, err := os.Lstat(target); err == nil {
-			return os.ErrExist
+			// OpenSSH sftp-server answers this case with a generic
+			// SSH_FX_FAILURE, not a "file exists" status; match it.
+			return errors.New("failure")
 		} else if !os.IsNotExist(err) {
 			return err
 		}
