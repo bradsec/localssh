@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"golang.org/x/crypto/ssh"
@@ -46,6 +47,21 @@ func (s *Session) Client() *ssh.Client { return s.client }
 // that Conn, whether via a real TCP dial (tests, native builds) or a
 // relay-backed transport (wsconn, in the WASM build).
 func Connect(ctx context.Context, conn net.Conn, hostPort, username, password string, verifyHostKey VerifyHostKeyFunc) (*Session, error) {
+	return connect(ctx, conn, hostPort, username, ssh.Password(password), verifyHostKey)
+}
+
+// ConnectWithKey is Connect with public-key authentication by signer. A
+// server that refuses the key fails with an error wrapping ErrKeyRejected.
+func ConnectWithKey(ctx context.Context, conn net.Conn, hostPort, username string, signer ssh.Signer, verifyHostKey VerifyHostKeyFunc) (*Session, error) {
+	session, err := connect(ctx, conn, hostPort, username, ssh.PublicKeys(signer), verifyHostKey)
+	// x/crypto/ssh reports exhausted auth methods only as this text.
+	if err != nil && strings.Contains(err.Error(), "unable to authenticate") {
+		return nil, fmt.Errorf("%w: %w", ErrKeyRejected, err)
+	}
+	return session, err
+}
+
+func connect(ctx context.Context, conn net.Conn, hostPort, username string, auth ssh.AuthMethod, verifyHostKey VerifyHostKeyFunc) (*Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -55,7 +71,7 @@ func Connect(ctx context.Context, conn net.Conn, hostPort, username, password st
 
 	config := &ssh.ClientConfig{
 		User: username,
-		Auth: []ssh.AuthMethod{ssh.Password(password)},
+		Auth: []ssh.AuthMethod{auth},
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return verifyHostKey(hostPort, HostKeyFingerprint(ssh.FingerprintSHA256(key)))
 		},

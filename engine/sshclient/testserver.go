@@ -1,11 +1,13 @@
 package sshclient
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/subtle"
 	"fmt"
 	"net"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/crypto/ssh"
@@ -25,10 +27,32 @@ type TestServer struct {
 
 	listener net.Listener
 	config   *ssh.ServerConfig
+
+	keysMu         sync.Mutex
+	authorizedKeys [][]byte
+}
+
+// AuthorizeKey lets the server's username log in with the private key that
+// matches pub, in addition to the password.
+func (s *TestServer) AuthorizeKey(pub ssh.PublicKey) {
+	s.keysMu.Lock()
+	defer s.keysMu.Unlock()
+	s.authorizedKeys = append(s.authorizedKeys, pub.Marshal())
+}
+
+func (s *TestServer) keyAuthorized(pub ssh.PublicKey) bool {
+	s.keysMu.Lock()
+	defer s.keysMu.Unlock()
+	for _, key := range s.authorizedKeys {
+		if bytes.Equal(key, pub.Marshal()) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewTestServer starts listening on 127.0.0.1:0 and accepts only the given
-// username/password pair.
+// username/password pair, plus any keys later passed to AuthorizeKey.
 func NewTestServer(username, password string) (*TestServer, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -49,6 +73,13 @@ func NewTestServer(username, password string) (*TestServer, error) {
 			return nil, fmt.Errorf("invalid credentials")
 		},
 	}
+	s := &TestServer{config: config}
+	config.PublicKeyCallback = func(conn ssh.ConnMetadata, pub ssh.PublicKey) (*ssh.Permissions, error) {
+		if conn.User() == username && s.keyAuthorized(pub) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("public key not authorized")
+	}
 	config.AddHostKey(signer)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -56,7 +87,8 @@ func NewTestServer(username, password string) (*TestServer, error) {
 		return nil, fmt.Errorf("listen: %w", err)
 	}
 
-	s := &TestServer{Addr: listener.Addr().String(), listener: listener, config: config}
+	s.Addr = listener.Addr().String()
+	s.listener = listener
 	go s.serve()
 	return s, nil
 }
