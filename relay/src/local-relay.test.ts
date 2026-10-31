@@ -69,7 +69,9 @@ describe("local relay", () => {
     const client = new WebSocket(`ws://127.0.0.1:${relayPort}`);
     await new Promise<void>((resolve) => client.once("open", resolve));
     const closed = new Promise<[number, string]>((resolve) =>
-      client.once("close", (closeCode, closeReason) => resolve([closeCode, closeReason.toString()])),
+      client.once("close", (closeCode, closeReason) =>
+        resolve([closeCode, closeReason.toString()]),
+      ),
     );
     client.send(encodeConnectFrame({ host: "127.0.0.1", port: 22 }));
     await vi.waitFor(() => expect(socket.listenerCount("error")).toBeGreaterThan(0));
