@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HelpProvider } from "./Help.js";
 import { SavedHosts } from "./SavedHosts.js";
 import type { VaultApi } from "../vault/useVault.js";
 
@@ -122,6 +123,19 @@ describe("SavedHosts", () => {
     await userEvent.click(screen.getByRole("button", { name: /create/i }));
 
     expect(vault.create).toHaveBeenCalledWith("a good master password");
+  });
+
+  it("links unlock and reset to the saved-hosts help", async () => {
+    render(
+      <HelpProvider>
+        <SavedHosts vault={vaultApi({ status: "locked" })} current={current} onPick={vi.fn()} />
+      </HelpProvider>,
+    );
+    const name = "Learn more about saved hosts";
+    expect(screen.getAllByRole("button", { name })).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole("button", { name: /forgotten your master password/i }));
+    expect(screen.getAllByRole("button", { name })).toHaveLength(2);
   });
 
   it("asks for the master password when locked", () => {

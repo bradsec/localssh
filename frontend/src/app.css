@@ -274,7 +274,6 @@ body:has(.app-shell--connect) {
    in size, weight, or colour. */
 .toolbar-button,
 .terminal-settings summary,
-.help summary,
 .about summary,
 .clipboard-menu summary {
   display: inline-flex;
@@ -297,7 +296,6 @@ body:has(.app-shell--connect) {
 }
 
 .terminal-settings summary::-webkit-details-marker,
-.help summary::-webkit-details-marker,
 .about summary::-webkit-details-marker,
 .clipboard-menu summary::-webkit-details-marker {
   display: none;
@@ -305,7 +303,6 @@ body:has(.app-shell--connect) {
 
 .toolbar-button:hover,
 .terminal-settings summary:hover,
-.help summary:hover,
 .about summary:hover,
 .clipboard-menu summary:hover {
   border-color: var(--border);
@@ -997,7 +994,6 @@ body:has(.app-shell--connect) {
 .button:active,
 .toolbar-button:active,
 .terminal-settings summary:active,
-.help summary:active,
 .about summary:active,
 .clipboard-menu summary:active {
   transform: translateY(1px);
@@ -1089,6 +1085,58 @@ body:has(.app-shell--connect) {
   background: var(--danger-surface);
   font-size: 0.82rem;
   transform: translateX(-50%);
+}
+
+/* A failed connection is reported beside the action that failed. */
+.connect-form .connection-error {
+  position: static;
+  grid-column: 1 / -1;
+  width: auto;
+  transform: none;
+}
+
+.connection-error p {
+  margin: 0;
+}
+
+.connection-error__causes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.connection-error__causes li + li {
+  margin-top: 4px;
+}
+
+.connection-error__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+  align-items: center;
+}
+
+.connection-error .learn-more {
+  color: inherit;
+}
+
+.connection-error__detail summary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.connection-error__detail[open] {
+  flex-basis: 100%;
+}
+
+.connection-error__detail code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.74rem;
 }
 
 .dialog-backdrop {
@@ -1287,19 +1335,28 @@ body:has(.app-shell--connect) {
   position: relative;
 }
 
-.help {
-  position: relative;
+.help-backdrop {
+  position: fixed;
+  /* Above the host-key prompt, which Help can be opened from. */
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: calc(8px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px
+    max(16px, env(safe-area-inset-left));
+  background: rgb(10 10 18 / 0.5);
 }
 
+/* Sized from the visual viewport so the search field and the text under it
+   stay above a phone's on-screen keyboard. */
 .help__panel {
-  position: fixed;
-  z-index: 5;
-  top: calc(66px + env(safe-area-inset-top));
-  right: 12px;
-  width: min(560px, calc(100vw - 24px));
-  max-height: min(75vh, 680px);
+  width: min(100%, 640px);
+  max-height: calc(var(--app-height, 100dvh) - 16px - env(safe-area-inset-top));
+  margin-top: var(--app-viewport-offset, 0px);
   overflow: auto;
-  padding: 18px;
+  overscroll-behavior: contain;
+  padding: 0 18px 18px;
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text);
@@ -1309,27 +1366,103 @@ body:has(.app-shell--connect) {
   line-height: 1.5;
 }
 
-.help__panel h2,
+.help__header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 12px;
+  align-items: center;
+  margin: 0 -18px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.help__header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.help__close {
+  min-height: 44px;
+}
+
+.help__search {
+  grid-column: 1 / -1;
+}
+
 .help__panel h3 {
   margin: 0 0 8px;
 }
 
 .help__panel section {
   padding-top: 18px;
+  /* Clear of the sticky header when a topic is scrolled into view. */
+  scroll-margin-top: 150px;
 }
 
 .help__panel p {
   margin: 0 0 8px;
 }
 
-.help__panel nav {
+.help__topics {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help__topics button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.help__topics button:hover {
+  border-color: var(--border-strong);
+}
+
+.help__results {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+}
+
+.help__results:empty {
+  display: none;
 }
 
 .help__panel a {
   color: var(--accent);
+}
+
+/* Inline text action that opens Help at a topic. */
+.learn-more {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: none;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.learn-more:hover {
+  color: var(--accent-hover);
 }
 
 .about__panel {
@@ -1600,7 +1733,7 @@ body:has(.app-shell--connect) {
   }
 
   .terminal-settings summary,
-  .help summary,
+  .help__trigger,
   .about summary,
   .clipboard-menu summary {
     padding: 0 9px;
@@ -1678,7 +1811,6 @@ body:has(.app-shell--connect) {
   /* Stay at or above the 44px iOS touch target even as type scales down. */
   .toolbar-button,
   .terminal-settings summary,
-  .help summary,
   .about summary,
   .clipboard-menu summary {
     min-height: 44px;
@@ -1697,10 +1829,6 @@ body:has(.app-shell--connect) {
   .terminal-settings fieldset {
     width: min(320px, calc(100vw - 16px));
     padding: 16px;
-  }
-
-  .help__panel {
-    top: calc(90px + env(safe-area-inset-top));
   }
 
   .active-target {

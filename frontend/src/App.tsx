@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { About } from "./components/About.js";
 import { ClipboardMenu } from "./components/ClipboardMenu.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
+import { ConnectionError } from "./components/ConnectionError.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
-import { Help } from "./components/Help.js";
+import { Help, HelpProvider } from "./components/Help.js";
 import { Icon } from "./components/Icon.js";
 import { KeyBar } from "./components/KeyBar.js";
 import { Terminal, type TerminalControls } from "./components/Terminal.js";
@@ -161,7 +162,7 @@ export function App() {
           password: values.password,
           isTrustedFingerprint: (fingerprint) => knownHosts.get(hostPort) === fingerprint,
           onData: (chunk) => terminalControlsRef.current?.write(chunk),
-          onClose: () => {
+          onClose: (reason) => {
             if (connectionAttemptRef.current !== attempt) return;
             handleRef.current = null;
             setActiveTarget(null);
@@ -172,7 +173,7 @@ export function App() {
             terminalControlsRef.current?.blur();
             updateModifiers(NO_MODIFIERS);
             setTerminalHasSelection(false);
-            setStatus({ kind: "idle" });
+            setStatus(reason ? { kind: "error", message: reason } : { kind: "idle" });
           },
         });
         if (connectionAttemptRef.current !== attempt) {
@@ -236,120 +237,118 @@ export function App() {
   }, [updateModifiers]);
 
   return (
-    <main
-      className={
-        status.kind === "connected"
-          ? "app-shell app-shell--session"
-          : "app-shell app-shell--connect"
-      }
-    >
-      <header className="app-toolbar">
-        <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true">
-            &gt;_
-          </span>
-          <span className="toolbar-brand">localssh</span>
-        </div>
-        <div className="session-identity">
-          <span
-            className={`connection-status connection-status--${status.kind}`}
-            aria-live="polite"
-          >
-            {status.kind === "connected"
-              ? "Connected"
-              : status.kind === "connecting"
-                ? "Connecting"
-                : "Offline"}
-          </span>
-          {activeTarget && <span className="active-target">{activeTarget}</span>}
-        </div>
-        <div className="toolbar-actions">
-          {status.kind === "connected" && (
-            <button className="toolbar-button" type="button" onClick={disconnect}>
-              <Icon name="logout" />
-              <span>Disconnect</span>
-            </button>
-          )}
-          {status.kind === "connected" && (
-            <ClipboardMenu
-              hasSelection={terminalHasSelection}
-              getSelection={() => terminalControlsRef.current?.getSelection() ?? ""}
-              onPaste={(text) => terminalControlsRef.current?.paste(text)}
-            />
-          )}
-          <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
-          <Help />
-          <About />
-        </div>
-      </header>
+    <HelpProvider>
+      <main
+        className={
+          status.kind === "connected"
+            ? "app-shell app-shell--session"
+            : "app-shell app-shell--connect"
+        }
+      >
+        <header className="app-toolbar">
+          <div className="brand-lockup">
+            <span className="brand-mark" aria-hidden="true">
+              &gt;_
+            </span>
+            <span className="toolbar-brand">localssh</span>
+          </div>
+          <div className="session-identity">
+            <span
+              className={`connection-status connection-status--${status.kind}`}
+              aria-live="polite"
+            >
+              {status.kind === "connected"
+                ? "Connected"
+                : status.kind === "connecting"
+                  ? "Connecting"
+                  : "Offline"}
+            </span>
+            {activeTarget && <span className="active-target">{activeTarget}</span>}
+          </div>
+          <div className="toolbar-actions">
+            {status.kind === "connected" && (
+              <button className="toolbar-button" type="button" onClick={disconnect}>
+                <Icon name="logout" />
+                <span>Disconnect</span>
+              </button>
+            )}
+            {status.kind === "connected" && (
+              <ClipboardMenu
+                hasSelection={terminalHasSelection}
+                getSelection={() => terminalControlsRef.current?.getSelection() ?? ""}
+                onPaste={(text) => terminalControlsRef.current?.paste(text)}
+              />
+            )}
+            <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
+            <Help />
+            <About />
+          </div>
+        </header>
 
-      <div className="workspace">
-        {status.kind !== "connected" && (
-          <ConnectDialog
-            vault={vault}
-            onConnect={attemptConnect}
-            disabled={status.kind === "connecting"}
-          />
-        )}
-        {status.kind === "error" && (
-          <p className="connection-error" role="alert">
-            {status.message}
-          </p>
-        )}
-        {status.kind === "connected" && status.inputError && (
-          <p className="connection-error" role="alert">
-            {status.inputError}
-          </p>
-        )}
-        <div className="terminal-frame" aria-label="SSH terminal">
-          <div className="terminal-frame__viewport">
-            <Terminal
-              onReady={(controls) => {
-                terminalControlsRef.current = controls;
-              }}
-              onInput={sendInput}
-              onFocusChange={setTerminalFocused}
-              onSelectionChange={setTerminalHasSelection}
-              onResize={(cols, rows) => {
-                // Held in a ref rather than state: nothing on the page displays
-                // the geometry, and a re-fit must not cost a render.
-                terminalSizeRef.current = { cols, rows };
-                handleRef.current?.resize(cols, rows);
-              }}
-              fontSize={terminalSettings.fontSize}
-              fontFamily={terminalSettings.fontFamily}
-              theme={terminalTheme}
-              active={status.kind === "connected"}
+        <div className="workspace">
+          {status.kind !== "connected" && (
+            <ConnectDialog
+              vault={vault}
+              onConnect={attemptConnect}
+              disabled={status.kind === "connecting"}
+              error={status.kind === "error" ? <ConnectionError raw={status.message} /> : null}
             />
+          )}
+          {status.kind === "connected" && status.inputError && (
+            <p className="connection-error" role="alert">
+              {status.inputError}
+            </p>
+          )}
+          <div className="terminal-frame" aria-label="SSH terminal">
+            <div className="terminal-frame__viewport">
+              <Terminal
+                onReady={(controls) => {
+                  terminalControlsRef.current = controls;
+                }}
+                onInput={sendInput}
+                onFocusChange={setTerminalFocused}
+                onSelectionChange={setTerminalHasSelection}
+                onResize={(cols, rows) => {
+                  // Held in a ref rather than state: nothing on the page displays
+                  // the geometry, and a re-fit must not cost a render.
+                  terminalSizeRef.current = { cols, rows };
+                  handleRef.current?.resize(cols, rows);
+                }}
+                fontSize={terminalSettings.fontSize}
+                fontFamily={terminalSettings.fontFamily}
+                theme={terminalTheme}
+                active={status.kind === "connected"}
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* The bar rides on the shell, which is pinned to the visual viewport, so
+        {/* The bar rides on the shell, which is pinned to the visual viewport, so
           it sits directly above the on-screen keyboard whenever that is open.
           It stays up when the keyboard is not: its keys write to the session
           without going through the terminal's focus, so a previous command can
           be recalled and run from the bar alone. */}
-      {status.kind === "connected" && touchPointer && (
-        <KeyBar
-          modifiers={modifiers}
-          keyboardUp={terminalFocused}
-          onToggleKeyboard={toggleKeyboard}
-          onToggleModifier={toggleModifier}
-          onKey={sendKey}
-        />
-      )}
+        {status.kind === "connected" && touchPointer && (
+          <KeyBar
+            modifiers={modifiers}
+            keyboardUp={terminalFocused}
+            onToggleKeyboard={toggleKeyboard}
+            onToggleModifier={toggleModifier}
+            onKey={sendKey}
+          />
+        )}
 
-      {status.kind === "unknown-host" && (
-        <HostKeyPrompt
-          hostPort={status.hostPort}
-          fingerprint={status.fingerprint}
-          changed={status.changed}
-          previousFingerprint={status.previousFingerprint}
-          onTrust={trustAndRetry}
-          onCancel={() => setStatus({ kind: "idle" })}
-        />
-      )}
-    </main>
+        {status.kind === "unknown-host" && (
+          <HostKeyPrompt
+            hostPort={status.hostPort}
+            fingerprint={status.fingerprint}
+            changed={status.changed}
+            previousFingerprint={status.previousFingerprint}
+            onTrust={trustAndRetry}
+            onCancel={() => setStatus({ kind: "idle" })}
+          />
+        )}
+      </main>
+    </HelpProvider>
   );
 }

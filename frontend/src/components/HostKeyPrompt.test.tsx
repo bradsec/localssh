@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { HelpProvider } from "./Help.js";
 import { HostKeyPrompt } from "./HostKeyPrompt.js";
 
 const base = {
@@ -10,6 +11,15 @@ const base = {
 };
 
 describe("HostKeyPrompt", () => {
+  it.each([false, true])("links to host-key help when changed is %s", (changed) => {
+    render(
+      <HelpProvider>
+        <HostKeyPrompt {...base} changed={changed} previousFingerprint="SHA256:old" />
+      </HelpProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Learn more about host keys" })).toBeInTheDocument();
+  });
+
   // The icon is emphasis. The words carry the meaning, because colour and
   // shape alone must not be what tells someone the key changed.
   it("keeps the warning wording when the key changed", () => {

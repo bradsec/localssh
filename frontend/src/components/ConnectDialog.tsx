@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { APP_VERSION } from "../appVersion.js";
 import { SavedHosts } from "./SavedHosts.js";
 import type { VaultApi } from "../vault/useVault.js";
@@ -16,6 +16,8 @@ export interface ConnectDialogProps {
   vault: VaultApi;
   onConnect: (values: ConnectFormValues) => void;
   disabled: boolean;
+  /** Why the last connection failed, shown under the connect action. */
+  error?: ReactNode;
 }
 
 /**
@@ -44,7 +46,7 @@ function migrateLastHost(): { host: string; port: number } | null {
   }
 }
 
-export function ConnectDialog({ vault, onConnect, disabled }: ConnectDialogProps) {
+export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDialogProps) {
   const [migrated] = useState(migrateLastHost);
   const [host, setHost] = useState(migrated?.host ?? "");
   const [port, setPort] = useState(String(migrated?.port ?? 22));
@@ -169,6 +171,7 @@ export function ConnectDialog({ vault, onConnect, disabled }: ConnectDialogProps
         >
           {disabled ? "Connecting to server..." : "Connect to server"}
         </button>
+        {error}
       </form>
       <SavedHosts
         vault={vault}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { LearnMore } from "./Help.js";
 import { readClipboardText, writeClipboardText } from "../clipboard.js";
 
 export interface ClipboardMenuProps {
@@ -26,6 +27,8 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
   const [manualCopy, setManualCopy] = useState("");
+  // Set while a blocked browser clipboard has the user on the manual route.
+  const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -36,6 +39,9 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
         (event.target as Element).hasAttribute("data-clipboard-staging")
       )
         return;
+      // Help opened from this menu sits on top of it: keep the menu, and the
+      // text staged for a manual copy, until Help hands focus back.
+      if ((event.target as Element).closest?.("[data-help-dialog]")) return;
       if (!detailsRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -62,6 +68,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
     }
     const ok = await writeClipboardText(text);
     setCopied(ok);
+    setBlocked(!ok);
     setManualCopy(ok ? "" : text);
     setStatus(
       ok
@@ -81,6 +88,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const pasteFromClipboard = async () => {
     const text = await readClipboardText();
     if (text === null) {
+      setBlocked(true);
       setStatus("The browser could not read the clipboard. Paste into the box below instead.");
       pasteFieldRef.current?.focus();
       return;
@@ -110,6 +118,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
         if (!nextOpen) {
           setStatus("");
           setCopied(false);
+          setBlocked(false);
           setManualCopy("");
           if (pasteFieldRef.current) pasteFieldRef.current.value = "";
         }
@@ -180,6 +189,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
         <p className="clipboard-menu__feedback" aria-live="polite">
           {status}
         </p>
+        {blocked && <LearnMore topic="clipboard" />}
       </div>
     </details>
   );

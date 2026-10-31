@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
+import { LearnMore } from "./Help.js";
 import { Icon } from "./Icon.js";
 
 export interface HostKeyPromptProps {
@@ -43,6 +44,15 @@ export function HostKeyPrompt({
       if (!first || !last) return;
 
       const active = document.activeElement;
+      // Help opened from this prompt is a modal of its own on top of it, and
+      // keeps Tab inside itself until it closes.
+      if (
+        active instanceof Element &&
+        !dialogRef.current.contains(active) &&
+        active.closest('[aria-modal="true"]')
+      ) {
+        return;
+      }
       if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
         event.preventDefault();
         last.focus();
@@ -102,7 +112,9 @@ export function HostKeyPrompt({
                 </dd>
               </div>
             </dl>
-            <p>Do not continue unless you know why the key changed.</p>
+            <p>
+              Do not continue unless you know why the key changed. <LearnMore topic="host-key" />
+            </p>
             <div className="dialog-actions">
               <button
                 ref={cancelRef}
@@ -126,7 +138,7 @@ export function HostKeyPrompt({
             <h2 id="host-key-title">Verify host key</h2>
             <p id="host-key-description">
               <strong>{hostPort}</strong> is not in your known hosts. Compare this fingerprint with
-              one obtained from the server administrator or console.
+              one obtained from the server administrator or console. <LearnMore topic="host-key" />
             </p>
             <div className="fingerprint">
               <span>SHA256 fingerprint</span>

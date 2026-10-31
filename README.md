@@ -348,9 +348,14 @@ scroll wheel. The terminal reports its fitted size to the remote PTY, so
 resizing the window, rotating a phone, or opening an on-screen keyboard keeps
 width-aware commands formatting correctly.
 
-The toolbar's Help menu covers connection setup, host-key checks, saved hosts,
-terminal controls, keyboard shortcuts, copy and paste, connection problems,
-privacy, and self-hosting.
+The toolbar's Help button opens a searchable guide to connection setup,
+host-key checks, saved hosts, terminal controls, keyboard shortcuts, copy and
+paste, connection problems, privacy, and self-hosting. It works on the connect
+screen and during a session, ships with the app, and closes with Escape. Failed
+connections, the host-key prompts, the saved-hosts unlock and reset forms, and
+the clipboard fallback link to the matching topic. A failed or dropped
+connection names the likely cause and next step; its Technical details line
+keeps the engine's original message.
 
 ## Phones and tablets
 

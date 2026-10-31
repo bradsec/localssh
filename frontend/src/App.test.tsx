@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App.js";
 import { APP_VERSION } from "./appVersion.js";
@@ -86,11 +86,15 @@ function usePointer(kind: "coarse" | "fine") {
 }
 
 /** Fills in the connect form and waits for the session to be up. */
-async function connect(user: ReturnType<typeof userEvent.setup>, host: string) {
+async function submitConnect(user: ReturnType<typeof userEvent.setup>, host: string) {
   await user.type(screen.getByLabelText(/^host$/i), host);
   await user.type(screen.getByLabelText(/^username$/i), "admin");
   await user.type(screen.getByLabelText(/^password$/i), "secret");
   await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
+}
+
+async function connect(user: ReturnType<typeof userEvent.setup>, host: string) {
+  await submitConnect(user, host);
   await screen.findByRole("button", { name: /disconnect/i });
 }
 
@@ -516,5 +520,146 @@ describe("App", () => {
     expect(screen.getByLabelText(/font size/i)).toHaveValue("14");
     expect(screen.getByLabelText(/font family/i)).toHaveValue(DEFAULT_FONT_FAMILY);
     expect(screen.getByLabelText(/color scheme/i)).toHaveValue(DEFAULT_THEME_NAME);
+  });
+
+  describe("help and recovery", () => {
+    it("turns a relay close reason into a recovery step with Help and the raw detail", async () => {
+      const raw =
+        "ssh handshake: ssh: handshake failed: relay connection closed: target connection refused (code 1011)";
+      vi.mocked(engine.connectSession).mockRejectedValueOnce(raw);
+
+      render(<App />);
+      const user = userEvent.setup();
+      await submitConnect(user, "10.0.0.40");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("The server refused the connection.");
+      expect(alert).toHaveTextContent("Check the port number");
+      expect(within(alert).getByText(raw)).toBeInTheDocument();
+
+      const learnMore = within(alert).getByRole("button", {
+        name: "Learn more about connection problems",
+      });
+      await user.click(learnMore);
+      expect(screen.getByRole("heading", { name: "Fix a connection problem" })).toHaveFocus();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(learnMore).toHaveFocus());
+    });
+
+    it("lists every likely cause when the relay cannot be reached", async () => {
+      vi.mocked(engine.connectSession).mockRejectedValueOnce(
+        "could not reach the relay: it may be down, or it refused this page's origin",
+      );
+
+      render(<App />);
+      await submitConnect(userEvent.setup(), "10.0.0.41");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Could not reach the relay.");
+      expect(within(alert).getAllByRole("listitem")).toHaveLength(3);
+      expect(alert).toHaveTextContent("ALLOWED_ORIGINS");
+      expect(alert).toHaveTextContent("MAX_SESSIONS");
+    });
+
+    it("explains a dropped session instead of returning to a silent connect form", async () => {
+      const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+      vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+      render(<App />);
+      await connect(userEvent.setup(), "10.0.0.42");
+      const { onClose } = vi.mocked(engine.connectSession).mock.calls[0]![0];
+      act(() => onClose("connection lost: relay connection closed (code 1006)"));
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("The connection to the server was lost.");
+      expect(screen.getByRole("button", { name: /^connect to server$/i })).toBeEnabled();
+    });
+
+    it("returns to the connect form without an error when the shell exits", async () => {
+      const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+      vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+      render(<App />);
+      await connect(userEvent.setup(), "10.0.0.43");
+      const { onClose } = vi.mocked(engine.connectSession).mock.calls[0]![0];
+      act(() => onClose(""));
+
+      expect(await screen.findByRole("button", { name: /^connect to server$/i })).toBeEnabled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("opens Help during a session without ending it", async () => {
+      const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+      vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+      render(<App />);
+      const user = userEvent.setup();
+      await connect(user, "10.0.0.44");
+
+      await user.click(screen.getByRole("button", { name: "Help" }));
+      expect(screen.getByRole("dialog", { name: "Help with localssh" })).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByText("Connected", { exact: true })).toBeInTheDocument();
+      expect(handle.close).not.toHaveBeenCalled();
+    });
+
+    it("opens Help over the host-key prompt and keeps Tab inside Help", async () => {
+      vi.mocked(engine.connectSession).mockRejectedValueOnce(
+        new engine.HostKeyRejectedError("10.0.0.45:22", "SHA256:deadbeef"),
+      );
+
+      render(<App />);
+      const user = userEvent.setup();
+      await submitConnect(user, "10.0.0.45");
+
+      const prompt = await screen.findByRole("alertdialog", { name: "Verify host key" });
+      const learnMore = within(prompt).getByRole("button", { name: /learn more/i });
+      await user.click(learnMore);
+      const help = screen.getByRole("dialog", { name: "Help with localssh" });
+      expect(screen.getByRole("heading", { name: "Check the host key" })).toHaveFocus();
+
+      await user.tab();
+      expect(help).toContainElement(document.activeElement as HTMLElement);
+
+      await user.keyboard("{Escape}");
+      expect(screen.getByRole("alertdialog", { name: "Verify host key" })).toBeInTheDocument();
+      await waitFor(() => expect(learnMore).toHaveFocus());
+    });
+
+    it("keeps a blocked copy staged while Help explains the manual route", async () => {
+      const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+      vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+      terminalSelectionText = "uptime output";
+
+      try {
+        render(<App />);
+        const user = userEvent.setup();
+        await connect(user, "10.0.0.46");
+        // After userEvent.setup, which installs a clipboard stub of its own.
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+          configurable: true,
+        });
+        Object.defineProperty(document, "execCommand", { value: () => false, configurable: true });
+        act(() => terminalSelectionChange?.(true));
+
+        await user.click(screen.getByRole("button", { name: /^clipboard/i }));
+        await user.click(screen.getByRole("button", { name: "Copy selection" }));
+        const learnMore = await screen.findByRole("button", {
+          name: "Learn more about copy and paste",
+        });
+        await user.click(learnMore);
+        expect(screen.getByRole("heading", { name: "Copy and paste" })).toHaveFocus();
+        await user.keyboard("{Escape}");
+
+        expect(screen.getByLabelText("Selection to copy manually")).toHaveValue("uptime output");
+        await waitFor(() => expect(learnMore).toHaveFocus());
+      } finally {
+        Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+        delete (document as { execCommand?: unknown }).execCommand;
+      }
+    });
   });
 });

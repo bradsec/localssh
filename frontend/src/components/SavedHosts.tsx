@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { LearnMore } from "./Help.js";
 import { Icon } from "./Icon.js";
 import { PasswordStrength } from "./PasswordStrength.js";
 import { SavedHostEditor } from "./SavedHostEditor.js";
@@ -147,6 +148,7 @@ function UnlockForm({ vault }: { vault: VaultApi }) {
         <button className="button button--primary" type="submit" disabled={vault.busy}>
           {vault.busy ? "Unlocking saved hosts..." : "Unlock saved hosts"}
         </button>
+        <LearnMore topic="saved-hosts" />
       </form>
 
       {!confirmingReset && (
@@ -163,7 +165,7 @@ function UnlockForm({ vault }: { vault: VaultApi }) {
         <div className="saved-hosts__reset">
           <p>
             Saved hosts cannot be recovered without the master password. Deleting the vault removes
-            every saved host from this browser.
+            every saved host from this browser. <LearnMore topic="saved-hosts" />
           </p>
           <label className="field">
             <span>Type {RESET_PHRASE} to confirm</span>

@@ -1,169 +1,240 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import { HelpContext, useHelp, type HelpApi } from "../helpContext.js";
+import { filterHelpTopics, HELP_TOPICS, helpTopicLabel, type HelpTopicId } from "../helpTopics.js";
 import { Icon } from "./Icon.js";
 
-export function Help() {
-  const detailsRef = useRef<HTMLDetailsElement>(null);
-  const [open, setOpen] = useState(false);
+/**
+ * Where focus goes when Help closes. The element that asked for Help can be
+ * gone (a closed session) or hidden in a menu that closed meanwhile; the menu's
+ * own toggle stands in for the second, and the Help button for the first.
+ */
+function resolveReturnFocus(element: HTMLElement | null): HTMLElement | null {
+  if (element?.isConnected && element !== document.body) {
+    const closedMenu = element.closest("details:not([open])");
+    return closedMenu?.querySelector<HTMLElement>("summary") ?? element;
+  }
+  return document.querySelector<HTMLElement>("[data-help-trigger]");
+}
 
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutside = (event: Event) => {
-      if (!detailsRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      detailsRef.current?.querySelector("summary")?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnOutside);
-    document.addEventListener("focusin", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutside);
-      document.removeEventListener("focusin", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
+export function HelpProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<{ isOpen: boolean; topic: HelpTopicId | null }>({
+    isOpen: false,
+    topic: null,
+  });
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const pendingFocusRef = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(pendingFocusRef.current), []);
+
+  const openHelp = useCallback((topic?: HelpTopicId, returnFocus?: HTMLElement | null) => {
+    // A close in the frame before must not pull focus out of the new dialog.
+    cancelAnimationFrame(pendingFocusRef.current);
+    returnFocusRef.current =
+      returnFocus ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setState({ isOpen: true, topic: topic ?? null });
+  }, []);
+
+  const closeHelp = useCallback(() => {
+    const returnFocus = returnFocusRef.current;
+    returnFocusRef.current = null;
+    setState((current) => ({ ...current, isOpen: false }));
+    // After the dialog unmounts, so focus does not land back inside it.
+    pendingFocusRef.current = requestAnimationFrame(() => resolveReturnFocus(returnFocus)?.focus());
+  }, []);
+
+  const api = useMemo<HelpApi>(
+    () => ({ ...state, openHelp, closeHelp }),
+    [state, openHelp, closeHelp],
+  );
+  return <HelpContext.Provider value={api}>{children}</HelpContext.Provider>;
+}
+
+/** The toolbar Help button and, while open, the Help dialog. */
+export function Help() {
+  const help = useHelp();
+  // What had focus when the pointer went down on the button, before the press
+  // moved it. During a session that is the terminal, which gets focus back on
+  // close so typing (and a phone's keyboard) carries on where it was.
+  const pointerFocusRef = useRef<HTMLElement | null>(null);
+  if (!help) return null;
 
   return (
-    <details
-      className="help"
-      ref={detailsRef}
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary role="button">
+    <>
+      <button
+        className="toolbar-button help__trigger"
+        type="button"
+        data-help-trigger
+        aria-haspopup="dialog"
+        aria-expanded={help.isOpen}
+        onPointerDown={() => {
+          pointerFocusRef.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        }}
+        onClick={(event) => {
+          const prior = pointerFocusRef.current;
+          pointerFocusRef.current = null;
+          help.openHelp(undefined, prior && prior !== document.body ? prior : event.currentTarget);
+        }}
+      >
         <Icon name="info" />
         <span className="toolbar-label">Help</span>
-      </summary>
-      <div className="help__panel">
-        <h2>Help with localssh</h2>
+      </button>
+      {help.isOpen &&
+        // Portalled out of the toolbar, whose stacking context would otherwise
+        // keep the dialog under the host-key prompt it may be opened from.
+        createPortal(<HelpDialog topic={help.topic} onClose={help.closeHelp} />, document.body)}
+    </>
+  );
+}
+
+function HelpDialog({ topic, onClose }: { topic: HelpTopicId | null; onClose: () => void }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [query, setQuery] = useState("");
+  // An object, so asking for the same topic twice still scrolls to it again.
+  const [shown, setShown] = useState<{ topic: HelpTopicId | null }>({ topic });
+  const topics = filterHelpTopics(query);
+  const trimmed = query.trim();
+
+  useEffect(() => {
+    const heading = shown.topic
+      ? dialogRef.current?.querySelector<HTMLElement>(`#help-${shown.topic}-title`)
+      : titleRef.current;
+    heading?.scrollIntoView?.({ block: "start" });
+    heading?.focus({ preventScroll: true });
+  }, [shown]);
+
+  function showTopic(id: HelpTopicId) {
+    setQuery("");
+    setShown({ topic: id });
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      // Menus that close on Escape listen on the document; this Escape is
+      // Help's alone, so an open Clipboard menu behind it stays open.
+      event.stopPropagation();
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+
+    const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, [tabindex]:not([tabindex="-1"])',
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === titleRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  return (
+    <div
+      className="help-backdrop"
+      data-help-dialog
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="help__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-title"
+        onKeyDown={handleKeyDown}
+      >
+        <div className="help__header">
+          <h2 id="help-title" ref={titleRef} tabIndex={-1}>
+            Help with localssh
+          </h2>
+          <button className="button help__close" type="button" onClick={onClose}>
+            Close
+          </button>
+          <label className="field help__search">
+            <span>Search help</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              enterKeyHint="search"
+            />
+          </label>
+        </div>
+
         <nav aria-label="Help topics">
-          <a href="#help-connect">Connect</a>
-          <a href="#help-host-key">Host keys</a>
-          <a href="#help-saved-hosts">Saved hosts</a>
-          <a href="#help-terminal">Terminal</a>
-          <a href="#help-shortcuts">Keyboard shortcuts</a>
-          <a href="#help-clipboard">Copy and paste</a>
-          <a href="#help-troubleshooting">Connection problems</a>
-          <a href="#help-privacy">Privacy</a>
-          <a href="#help-hosting">Self-hosting</a>
+          <ul className="help__topics">
+            {HELP_TOPICS.map((item) => (
+              <li key={item.id}>
+                <button type="button" onClick={() => showTopic(item.id)}>
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
         </nav>
 
-        <section id="help-connect">
-          <h3>Connect to a server</h3>
-          <p>
-            Enter the server hostname or IP address, SSH port, username, and password. Select
-            Connect to server. Port 22 is the usual SSH port.
-          </p>
-          <p>
-            You can connect without setting up saved hosts. A password you type is kept for this
-            connection only.
-          </p>
-        </section>
-        <section id="help-host-key">
-          <h3>Check the host key</h3>
-          <p>
-            On your first connection, compare the SHA-256 fingerprint with one from the server
-            administrator or server console. Select Trust and connect only if they match.
-          </p>
-          <p>
-            If the key changes later, stop and check why. A server reinstall can change a key, but
-            an intercepted connection can too. Compare the new fingerprint through a trusted route
-            before selecting Replace key and connect.
-          </p>
-        </section>
-        <section id="help-saved-hosts">
-          <h3>Save a host</h3>
-          <p>
-            Create an address book with a master password, then select Save current host. Choose
-            whether to save the host, username, or password. Saved entries are encrypted in this
-            browser.
-          </p>
-          <p>
-            Unlock saved hosts once per page load. There is no master password recovery. If you
-            forget it, you must delete the address book and start again.
-          </p>
-        </section>
-        <section id="help-terminal">
-          <h3>Use the terminal</h3>
-          <p>
-            On a touch screen, the key bar supplies Esc, Tab, arrows, and other shell keys. Tap Ctrl
-            or Alt once for the next key, twice to lock it, and a third time to turn it off.
-          </p>
-          <p>
-            Swipe right for Tab or left for Esc. Flick up or down near the prompt for command
-            history. Drag with two fingers to scroll output. Long press and drag to select text.
-          </p>
-          <p>Use Appearance to change the terminal font, size, or color scheme.</p>
-        </section>
-        <section id="help-shortcuts">
-          <h3>Keyboard shortcuts</h3>
-          <p>
-            With a hardware keyboard, use Esc, Tab, arrow keys, and shell shortcuts as usual. Ctrl+C
-            interrupts a command, Ctrl+D sends end of input, and Ctrl+Z suspends a job. Ctrl+R
-            searches command history when the remote shell supports it.
-          </p>
-        </section>
-        <section id="help-clipboard">
-          <h3>Copy and paste</h3>
-          <p>
-            On iPhone, iPad, or Android, long press and drag to select terminal text. Open Clipboard
-            and select Copy selection. If the browser blocks copying, select the text shown in the
-            menu and use the device Copy action.
-          </p>
-          <p>
-            To paste, open Clipboard and use Paste from clipboard. If browser access is blocked,
-            paste into the box and select Paste text. On desktop, you can also select terminal text
-            and use your browser's copy and paste shortcuts.
-          </p>
-        </section>
-        <section id="help-troubleshooting">
-          <h3>Fix a connection problem</h3>
-          <p>
-            If the relay cannot be reached, check that localssh is running and that you opened the
-            right address. If you run the relay, check its logs for a refused origin, host, or port.
-          </p>
-          <p>
-            If the SSH login fails, check the host, port, username, and password. Ask the server
-            administrator whether the server accepts password login. If a host key changed, verify
-            the new fingerprint before continuing.
-          </p>
-        </section>
-        <section id="help-privacy">
-          <h3>How your connection is protected</h3>
-          <p>
-            The SSH engine runs in your browser. The relay connects your browser to the server
-            because browsers cannot open raw TCP connections. It carries encrypted SSH traffic and
-            cannot read your password or terminal output.
-          </p>
-          <p>
-            Saved hosts and optional saved passwords are encrypted under your master password in
-            this browser. The SSH server receives your login credentials through the encrypted SSH
-            connection. localssh has no application account or credential server. This design has
-            not been independently audited.
-          </p>
-        </section>
-        <section id="help-hosting">
-          <h3>Run localssh yourself</h3>
-          <p>
-            Docker Compose serves the app and relay through one web port. The default address is
-            localhost:9080. For LAN access, set a LAN bind address and restrict the target hosts and
-            ports in the relay configuration.
-          </p>
-          <p>
-            Do not expose the HTTP service directly to the internet. For internet access, use an
-            authenticated HTTPS reverse proxy and a restrictive target allowlist.
-          </p>
-          <a
-            href="https://github.com/bradsec/localssh#install-with-docker"
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            Read setup and update instructions
-          </a>
-        </section>
-      </div>
-    </details>
+        <p className="help__results" aria-live="polite">
+          {trimmed === ""
+            ? ""
+            : topics.length === 0
+              ? `No help topics match "${trimmed}". Try another word, or clear the search.`
+              : `${topics.length} ${topics.length === 1 ? "topic matches" : "topics match"} "${trimmed}".`}
+        </p>
+
+        {topics.map((item) => (
+          <section key={item.id} id={`help-${item.id}`} aria-labelledby={`help-${item.id}-title`}>
+            <h3 id={`help-${item.id}-title`} tabIndex={-1}>
+              {item.heading}
+            </h3>
+            {item.paragraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+            {item.link && (
+              <a href={item.link.href} target="_blank" rel="noreferrer noopener">
+                {item.link.text}
+              </a>
+            )}
+          </section>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+/** Opens Help at `topic`. Renders nothing outside a HelpProvider. */
+export function LearnMore({ topic }: { topic: HelpTopicId }) {
+  const help = useHelp();
+  if (!help) return null;
+  return (
+    <button
+      className="learn-more"
+      type="button"
+      onClick={(event) => help.openHelp(topic, event.currentTarget)}
+    >
+      Learn more{" "}
+      <span className="visually-hidden">about {helpTopicLabel(topic).toLowerCase()}</span>
+    </button>
   );
 }
