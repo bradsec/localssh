@@ -76,3 +76,15 @@ Dependencies x Go and npm advisories | Covered by govulncheck and npm audit
 Git history secrets, deployed headers, live hostile-server tests | Not covered
 
 Prior S-01 and S-02 were carried unchanged: their source (`deploy/nginx.conf`, `relay/src/access.ts`, `relay/src/local-relay.ts`) did not change in this range. No pass establishes complete coverage.
+
+## Fixes applied
+
+ID | Files | Tests
+--- | --- | ---
+NF-1 | `engine/remotefiles/remotefiles.go`, `engine/sftpjs.go`, `frontend/src/ssh/engine.ts`, `frontend/src/components/FilePanel.tsx` | `TestListTruncatesAtCap`, FilePanel "says when the folder listing was truncated"
+NF-2 | `engine/remotefiles/remotefiles.go`, `engine/sftpjs.go`, `frontend/src/ssh/engine.ts`, `frontend/src/components/FilePanel.tsx` | `TestDownloadStopsAtStatSize`, FilePanel "reports a file that grew while downloading on both storage paths"
+Key size cap (64 KiB) | `frontend/src/components/ConnectDialog.tsx` | ConnectDialog "rejects a private key over 64 KiB, picked or pasted"
+Replace copies permission bits only | `engine/remotefiles/remotefiles.go` | `TestReplaceDropsSpecialBits`
+Wipe pending key and passphrase on replaced host-key prompt | `frontend/src/App.tsx` | App "wipes a pending key and passphrase when a new connection replaces the host-key prompt"
+
+Limit: pkg/sftp v1.13.12 `ReadDirContext` has no per-entry hook, so NF-1 truncates after the server's listing is read. It bounds the DOM, link stat calls, and the JS array, not the Go heap during the read.

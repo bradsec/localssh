@@ -85,6 +85,7 @@ const downloadOneChunk = vi.fn(
   ) => {
     await onChunk(new Uint8Array([1, 2, 3]));
     onProgress(100);
+    return undefined;
   },
 );
 
@@ -269,6 +270,20 @@ describe("closing", () => {
   });
 });
 
+describe("listing cap", () => {
+  it("says when the folder listing was truncated", async () => {
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue({
+        path: "/srv",
+        entries: [{ name: "a.txt", kind: "file", isLink: false, size: 3 }],
+        truncated: true,
+      }),
+    });
+    renderPanel(files);
+    expect(await screen.findByText("Showing the first 10,000 items in this folder.")).toBeVisible();
+  });
+});
+
 describe("downloads", () => {
   it("falls back to memory when browser storage has no createWritable", async () => {
     const { directory, stored } = fakeDirectory({ writable: false });
@@ -286,6 +301,29 @@ describe("downloads", () => {
     expect(directory.removeEntry).toHaveBeenCalledOnce();
     expect(stored.size).toBe(0);
     expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+  });
+
+  it("reports a file that grew while downloading on both storage paths", async () => {
+    for (const writable of [true, false]) {
+      fakeDirectory({ writable });
+      const files = makeFiles({
+        list: vi
+          .fn()
+          .mockResolvedValue(
+            listing("/srv", [{ name: "a.log", kind: "file", isLink: false, size: 1234 }]),
+          ),
+        download: vi.fn(async (_p: string, onChunk: (c: Uint8Array) => Promise<void>) => {
+          await onChunk(new Uint8Array([1, 2, 3]));
+          return { grew: true, size: 1234 };
+        }),
+      });
+      const { user, unmount } = renderPanel(files);
+      await user.click(await screen.findByRole("button", { name: "Download file a.log" }));
+      expect(
+        await screen.findByText("The file grew while downloading. Saved the first 1,234 bytes."),
+      ).toBeVisible();
+      unmount();
+    }
   });
 
   it("keeps the stored copy until the next transfer and removes it on close", async () => {

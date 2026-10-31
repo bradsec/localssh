@@ -172,7 +172,7 @@ func (f *sftpBridge) value() js.Value {
 			if closed {
 				return nil, errFilesClosed
 			}
-			resolved, entries, err := remotefiles.List(f.client, name, time.Now())
+			resolved, entries, truncated, err := remotefiles.List(f.client, name, time.Now())
 			if err != nil {
 				return nil, err
 			}
@@ -180,7 +180,7 @@ func (f *sftpBridge) value() js.Value {
 			for _, entry := range entries {
 				items = append(items, map[string]any{"name": entry.Name, "kind": string(entry.Kind), "isLink": entry.IsLink, "size": float64(entry.Size)})
 			}
-			return map[string]any{"path": resolved, "entries": items}, nil
+			return map[string]any{"path": resolved, "entries": items, "truncated": truncated}, nil
 		})
 	})
 	upload := js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -195,7 +195,7 @@ func (f *sftpBridge) value() js.Value {
 			return promise(func() (any, error) { return nil, errors.New("invalid download arguments") })
 		}
 		name, chunk, progress := args[0].String(), args[1], args[2]
-		return promise(func() (any, error) { return nil, f.download(name, chunk, progress) })
+		return promise(func() (any, error) { return f.download(name, chunk, progress) })
 	})
 	cancel := js.FuncOf(func(_ js.Value, _ []js.Value) any {
 		f.mu.Lock()
@@ -250,18 +250,26 @@ func (f *sftpBridge) upload(name string, local js.Value, overwrite bool, progres
 	return reporter.err
 }
 
-func (f *sftpBridge) download(name string, chunk, progress js.Value) error {
+func (f *sftpBridge) download(name string, chunk, progress js.Value) (any, error) {
 	ctx, t, err := f.start()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer f.finish(t)
 	reporter := &percentReporter{callback: progress, last: -1}
-	if err := remotefiles.Download(ctx, f.client, name, jsChunkWriter{chunk: chunk}, reporter.report); err != nil {
-		return err
+	var size int64
+	grew, err := remotefiles.Download(ctx, f.client, name, jsChunkWriter{chunk: chunk}, func(done, total int64) {
+		size = total
+		reporter.report(done, total)
+	})
+	if err != nil {
+		return nil, err
 	}
 	reporter.report(1, 1)
-	return reporter.err
+	if reporter.err != nil {
+		return nil, reporter.err
+	}
+	return map[string]any{"grew": grew, "size": float64(size)}, nil
 }
 
 // jsFileReader reads a browser File in slices, so the file is never held in

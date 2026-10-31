@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConnectDialog } from "./ConnectDialog.js";
 import type { VaultApi } from "../vault/useVault.js";
@@ -62,6 +62,29 @@ describe("ConnectDialog", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/select a private-key file or paste/i);
     expect(onConnect).not.toHaveBeenCalled();
   });
+  it("rejects a private key over 64 KiB, picked or pasted", async () => {
+    const onConnect = vi.fn();
+    render(<ConnectDialog vault={vaultApi()} onConnect={onConnect} disabled={false} />);
+    await userEvent.type(screen.getByLabelText(/^host$/i), "10.0.0.9");
+    await userEvent.type(screen.getByLabelText(/^username$/i), "pi");
+    await userEvent.click(screen.getByLabelText(/^private key$/i));
+    const big = "k".repeat(64 * 1024 + 1);
+
+    const file = new File([big], "id_big");
+    const arrayBuffer = vi.spyOn(file, "arrayBuffer");
+    await userEvent.upload(screen.getByLabelText(/private-key file/i), file);
+    await userEvent.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be read/i);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/or paste the private key/i), {
+      target: { value: big },
+    });
+    await userEvent.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be read/i);
+    expect(onConnect).not.toHaveBeenCalled();
+  });
+
   it("connects with a typed password", async () => {
     const onConnect = vi.fn();
     render(<ConnectDialog vault={vaultApi()} onConnect={onConnect} disabled={false} />);

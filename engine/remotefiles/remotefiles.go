@@ -59,6 +59,10 @@ const (
 	Broken Kind = "broken"
 )
 
+// maxListEntries bounds how many names List returns, so a hostile or huge
+// folder cannot flood the page. A variable so tests can lower it.
+var maxListEntries = 10000
+
 // Entry is one name in a directory listing.
 type Entry struct {
 	Name   string
@@ -69,11 +73,16 @@ type Entry struct {
 
 // List reads dir, resolves symbolic links for display, and removes this
 // app's staged uploads older than StaleTempAge relative to now. It returns
-// the server's absolute form of dir.
-func List(c *sftp.Client, dir string, now time.Time) (string, []Entry, error) {
+// the server's absolute form of dir. It returns at most maxListEntries
+// entries and reports truncated when the folder held more.
+func List(c *sftp.Client, dir string, now time.Time) (string, []Entry, bool, error) {
 	infos, err := c.ReadDir(dir)
 	if err != nil {
-		return "", nil, err
+		return "", nil, false, err
+	}
+	truncated := len(infos) > maxListEntries
+	if truncated {
+		infos = infos[:maxListEntries]
 	}
 	resolved, err := c.RealPath(dir)
 	if err != nil {
@@ -98,7 +107,7 @@ func List(c *sftp.Client, dir string, now time.Time) (string, []Entry, error) {
 		}
 		entries = append(entries, entry)
 	}
-	return resolved, entries, nil
+	return resolved, entries, truncated, nil
 }
 
 func isStaleTemp(info os.FileInfo, now time.Time) bool {
@@ -180,7 +189,7 @@ func Upload(ctx context.Context, c *sftp.Client, name string, src io.Reader, siz
 		return nil
 	}
 	if target.Mode().IsRegular() {
-		if err := c.Chmod(temp, target.Mode()&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky)); err != nil {
+		if err := c.Chmod(temp, target.Mode()&os.ModePerm); err != nil {
 			return fmt.Errorf("keep permissions of %s: %w", name, err)
 		}
 	}
@@ -225,32 +234,40 @@ func (r *cancelReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// errGrew stops a download that reached the size Stat reported.
+var errGrew = errors.New("file grew during download")
+
 // Download streams the regular file at name, following a symbolic link, to
-// dst. progress receives bytes written and the file's size.
-func Download(ctx context.Context, c *sftp.Client, name string, dst io.Writer, progress func(done, total int64)) error {
+// dst. progress receives bytes written and the file's size. It writes at most
+// the size Stat reported when it started and returns grew when the server had
+// more data.
+func Download(ctx context.Context, c *sftp.Client, name string, dst io.Writer, progress func(done, total int64)) (grew bool, err error) {
 	info, err := c.Stat(name)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !info.Mode().IsRegular() {
-		return errors.New("not a regular file")
+		return false, errors.New("not a regular file")
 	}
 	remote, err := c.Open(name)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer remote.Close()
 	w := &cancelWriter{ctx: ctx, w: dst, total: info.Size(), progress: progress}
 	if _, err := remote.WriteTo(w); err != nil {
 		if ctx.Err() != nil {
-			return ErrCancelled
+			return false, ErrCancelled
 		}
-		return err
+		if errors.Is(err, errGrew) {
+			return true, nil
+		}
+		return false, err
 	}
 	if ctx.Err() != nil {
-		return ErrCancelled
+		return false, ErrCancelled
 	}
-	return nil
+	return false, nil
 }
 
 type cancelWriter struct {
@@ -265,8 +282,15 @@ func (w *cancelWriter) Write(p []byte) (int, error) {
 	if w.ctx.Err() != nil {
 		return 0, ErrCancelled
 	}
+	extra := false
+	if remaining := w.total - w.written; int64(len(p)) > remaining {
+		p, extra = p[:remaining], true
+	}
 	n, err := w.w.Write(p)
 	w.written += int64(n)
+	if err == nil && extra {
+		err = errGrew
+	}
 	if w.progress != nil {
 		w.progress(w.written, w.total)
 	}

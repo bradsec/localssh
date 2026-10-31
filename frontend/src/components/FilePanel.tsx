@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { describeSftpFailure } from "../connectionErrors.js";
 import {
   openFiles,
+  type DownloadResult,
   REMOTE_FILE_EXISTS,
   type RemoteFile,
   type SftpHandle,
@@ -47,6 +48,7 @@ function describeEntry(entry: RemoteFile): string {
 interface HeldDownload {
   url: string;
   release: () => void;
+  result?: DownloadResult;
 }
 
 function saveLink(url: string, filename: string) {
@@ -77,7 +79,7 @@ async function receiveFile(
         writable = await handle.createWritable();
         const stream = writable;
         downloading = true;
-        await files.download(
+        const result = await files.download(
           remotePath,
           async (chunk) => {
             await stream.write(chunk.slice().buffer);
@@ -91,6 +93,7 @@ async function receiveFile(
         // it stays until the next transfer, panel close, page hide, or timer.
         return {
           url,
+          result,
           release: () => {
             URL.revokeObjectURL(url);
             void directory.removeEntry(tempName).catch(console.error);
@@ -109,7 +112,7 @@ async function receiveFile(
 
   const chunks: ArrayBuffer[] = [];
   let size = 0;
-  await files.download(
+  const result = await files.download(
     remotePath,
     async (chunk) => {
       size += chunk.byteLength;
@@ -121,7 +124,7 @@ async function receiveFile(
   );
   const url = URL.createObjectURL(new Blob(chunks));
   saveLink(url, filename);
-  return { url, release: () => URL.revokeObjectURL(url) };
+  return { url, result, release: () => URL.revokeObjectURL(url) };
 }
 
 type HeldSlot = { download: HeldDownload; timer: number } | null;
@@ -147,6 +150,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
   } | null>(null);
   const [pendingReplace, setPendingReplace] = useState<File | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [truncated, setTruncated] = useState(false);
   const [notice, setNotice] = useState("");
   const [downloadLink, setDownloadLink] = useState<{ url: string; name: string } | null>(null);
   const [failure, setFailure] = useState<{ raw: string; path: string; name: string } | null>(null);
@@ -178,6 +182,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
           const listing = await opened.list(".");
           if (disposed) return;
           setEntries(listing.entries);
+          setTruncated(!!listing.truncated);
           setPath(listing.path);
           setPathInput(listing.path);
         } catch (error) {
@@ -205,6 +210,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
     try {
       const listing = await files.list(next.trim());
       setEntries(listing.entries);
+      setTruncated(!!listing.truncated);
       setPath(listing.path);
       setPathInput(listing.path);
       setNotice("");
@@ -233,7 +239,9 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
       await files.upload(remotePath, file, overwrite, (percent) =>
         setBusy({ kind: "upload", name: shown, percent }),
       );
-      setEntries((await files.list(path)).entries);
+      const refreshed = await files.list(path);
+      setEntries(refreshed.entries);
+      setTruncated(!!refreshed.truncated);
       setNotice(`Uploaded ${shown}.`);
     } catch (error) {
       if (!overwrite && String(error).includes(REMOTE_FILE_EXISTS)) setPendingReplace(file);
@@ -260,7 +268,11 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
         }, DOWNLOAD_KEEP_MS),
       };
       setDownloadLink({ url: received.url, name: shown });
-      setNotice(`Downloaded ${shown}.`);
+      setNotice(
+        received.result?.grew
+          ? `The file grew while downloading. Saved the first ${received.result.size.toLocaleString()} bytes.`
+          : `Downloaded ${shown}.`,
+      );
     } catch (error) {
       setFailure({ raw: String(error), path: displayName(remotePath), name: shown });
     } finally {
@@ -357,6 +369,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
       {!loading && entries.length === 0 && !failure && (
         <p>No files in this directory. Choose another path or upload a file.</p>
       )}
+      {!loading && truncated && <p>Showing the first 10,000 items in this folder.</p>}
       {!loading && entries.length > 0 && (
         <ul className="file-panel__list">
           {entries.map((entry) => (

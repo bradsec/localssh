@@ -5,6 +5,9 @@ import type { VaultApi } from "../vault/useVault.js";
 import type { SavedEntry } from "../vault/vaultEngine.js";
 import type { ConnectPassword } from "../ssh/engine.js";
 
+/** Private keys are a few KiB; a larger input is a mistake and would exhaust memory. */
+const MAX_KEY_BYTES = 64 * 1024;
+
 export interface ConnectFormValues {
   host: string;
   port: number;
@@ -74,9 +77,14 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
       setReadingKey(true);
       setKeyError("");
       try {
+        if (!pastedKey && keyFile!.size > MAX_KEY_BYTES) throw new Error("key too large");
         const privateKey = pastedKey
           ? new TextEncoder().encode(pastedKey)
           : new Uint8Array(await keyFile!.arrayBuffer());
+        if (privateKey.byteLength > MAX_KEY_BYTES) {
+          privateKey.fill(0);
+          throw new Error("key too large");
+        }
         onConnect({
           host,
           port: Number(port),

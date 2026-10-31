@@ -20,6 +20,15 @@ export interface RemoteListing {
   /** The server's absolute form of the requested path. */
   path: string;
   entries: RemoteFile[];
+  /** True when the folder held more entries than the engine returns. */
+  truncated?: boolean;
+}
+
+export interface DownloadResult {
+  /** True when the server had more data than the size reported at the start. */
+  grew: boolean;
+  /** The size reported at the start; the download stops there. */
+  size: number;
 }
 
 /** The text the engine rejects with when an upload without overwrite finds its target. */
@@ -37,7 +46,7 @@ export interface SftpHandle {
     path: string,
     onChunk: (chunk: Uint8Array) => Promise<void>,
     onProgress: (percent: number) => void,
-  ): Promise<void>;
+  ): Promise<DownloadResult | undefined>;
   cancel(): void;
   close(): void;
 }

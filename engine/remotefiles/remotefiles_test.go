@@ -82,7 +82,7 @@ func TestListResolvesLinksAndPath(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	resolved, entries, err := List(client, "logs/..", time.Now())
+	resolved, entries, _, err := List(client, "logs/..", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestListResolvesLinksAndPath(t *testing.T) {
 			t.Errorf("%s: got %+v, want %+v", name, got[name], entry)
 		}
 	}
-	sub, _, err := List(client, "logs", time.Now())
+	sub, _, _, err := List(client, "logs", time.Now())
 	if err != nil || sub != "/logs" {
 		t.Fatalf("subfolder path %q, err %v", sub, err)
 	}
@@ -127,7 +127,7 @@ func TestListRemovesOnlyStaleTemps(t *testing.T) {
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}
-	_, entries, err := List(client, ".", time.Now())
+	_, entries, _, err := List(client, ".", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestUploadDownloadLargerThanOneChunk(t *testing.T) {
 	}
 	var got bytes.Buffer
 	var done, total int64
-	if err := Download(t.Context(), client, "big.bin", &got, func(d, tot int64) { done, total = d, tot }); err != nil {
+	if _, err := Download(t.Context(), client, "big.bin", &got, func(d, tot int64) { done, total = d, tot }); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got.Bytes(), data) || done != total || total != int64(len(data)) {
@@ -322,7 +322,7 @@ func TestCancelledDownload(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	var got bytes.Buffer
-	err := Download(ctx, client, "big.bin", &got, func(done, _ int64) {
+	_, err := Download(ctx, client, "big.bin", &got, func(done, _ int64) {
 		if done >= 64<<10 {
 			cancel()
 		}
@@ -340,7 +340,7 @@ func TestDownloadRejectsFolderAndFollowsLink(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := Download(t.Context(), client, "dir", &bytes.Buffer{}, nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+	if _, err := Download(t.Context(), client, "dir", &bytes.Buffer{}, nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("folder download: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("via link"), 0o644); err != nil {
@@ -350,7 +350,7 @@ func TestDownloadRejectsFolderAndFollowsLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got bytes.Buffer
-	if err := Download(t.Context(), client, "link", &got, nil); err != nil || got.String() != "via link" {
+	if _, err := Download(t.Context(), client, "link", &got, nil); err != nil || got.String() != "via link" {
 		t.Fatalf("link download %q, err %v", got.String(), err)
 	}
 }
@@ -369,5 +369,81 @@ func TestUploadRejectsFolderTarget(t *testing.T) {
 		if err := Upload(t.Context(), client, name, strings.NewReader("x"), 1, false, nil); err == nil {
 			t.Fatalf("upload to %q accepted", name)
 		}
+	}
+}
+
+func TestListTruncatesAtCap(t *testing.T) {
+	client, root := connect(t)
+	old := maxListEntries
+	maxListEntries = 5
+	t.Cleanup(func() { maxListEntries = old })
+	for i := range 8 {
+		if err := os.WriteFile(filepath.Join(root, "f"+strings.Repeat("x", i)), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, entries, truncated, err := List(client, ".", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 5 || !truncated {
+		t.Fatalf("got %d entries, truncated %v; want 5, true", len(entries), truncated)
+	}
+	maxListEntries = 8
+	if _, entries, truncated, err = List(client, ".", time.Now()); err != nil || len(entries) != 8 || truncated {
+		t.Fatalf("at the cap: %d entries, truncated %v, err %v", len(entries), truncated, err)
+	}
+}
+
+func TestDownloadStopsAtStatSize(t *testing.T) {
+	client, root := connect(t)
+	const size = 4 << 20
+	target := filepath.Join(root, "log.bin")
+	if err := os.WriteFile(target, randomBytes(t, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grown := false
+	var got bytes.Buffer
+	grew, err := Download(t.Context(), client, "log.bin", &got, func(done, _ int64) {
+		if grown {
+			return
+		}
+		grown = true
+		f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
+		if _, err := f.Write(randomBytes(t, 1<<20)); err != nil {
+			t.Error(err)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !grew || got.Len() != size {
+		t.Fatalf("grew %v, wrote %d bytes; want true, %d", grew, got.Len(), size)
+	}
+}
+
+func TestReplaceDropsSpecialBits(t *testing.T) {
+	client, root := connect(t)
+	target := filepath.Join(root, "tool")
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o751|os.ModeSetuid|os.ModeSetgid|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upload(t.Context(), client, "tool", strings.NewReader("new"), 3, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode() != 0o751 {
+		t.Fatalf("mode %v, want -rwxr-x--x", info.Mode())
 	}
 }

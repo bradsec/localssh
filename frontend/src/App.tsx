@@ -54,6 +54,13 @@ type Status =
     }
   | { kind: "error"; message: string };
 
+/** Zeroes the key bytes and drops the passphrase of values that will never be sent. */
+function wipeKey(values: ConnectFormValues) {
+  if (values.password.kind !== "key") return;
+  values.password.privateKey.fill(0);
+  values.password.passphrase = "";
+}
+
 type TerminalTab = {
   id: number;
   host: string;
@@ -199,6 +206,8 @@ export function App() {
 
   const attemptConnect = async (values: ConnectFormValues, retryTab?: TerminalTab) => {
     const attempt = ++connectionAttemptRef.current;
+    // A new connection replaces a pending host-key prompt; its key is unusable now.
+    if (!retryTab && status.kind === "unknown-host") wipeKey(status.pending);
     setStatus({ kind: "connecting" });
     const hostPort = `${values.host}:${values.port}`;
     const tab: TerminalTab = retryTab ?? {

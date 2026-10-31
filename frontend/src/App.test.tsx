@@ -484,6 +484,40 @@ describe("App", () => {
     if (key?.kind === "key") expect(Array.from(key.privateKey)).toEqual(Array(8).fill(0));
   });
 
+  it("wipes a pending key and passphrase when a new connection replaces the host-key prompt", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const third: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession)
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new engine.HostKeyRejectedError("second.example:22", "SHA256:other"))
+      .mockResolvedValueOnce(third);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await user.type(screen.getByLabelText(/^host$/i), "second.example");
+    await user.type(screen.getByLabelText(/^username$/i), "admin");
+    await user.click(screen.getByLabelText(/^private key$/i));
+    await user.type(screen.getByLabelText(/or paste the private key/i), "test-key");
+    await user.type(screen.getByLabelText(/^key passphrase$/i), "hunter2");
+    await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
+    await screen.findByRole("alertdialog", { name: "Verify host key" });
+    const key = vi.mocked(engine.connectSession).mock.calls[1]?.[0].password;
+    expect(key).toMatchObject({ kind: "key" });
+    await user.click(screen.getByRole("button", { name: "Return to open terminal" }));
+    await user.keyboard("{Control>}{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}{/Control}");
+    await screen.findByRole("alertdialog", { name: "Verify host key" });
+
+    await user.clear(screen.getByLabelText(/^host$/i));
+    await user.clear(screen.getByLabelText(/^username$/i));
+    await submitConnect(user, "third.example");
+    await waitFor(() => expect(engine.connectSession).toHaveBeenCalledTimes(3));
+
+    if (key?.kind !== "key") throw new Error("expected a key");
+    expect(Array.from(key.privateKey)).toEqual(Array(8).fill(0));
+    expect(key.passphrase).toBe("");
+  });
+
   it("stores an accepted host key and retries the connection", async () => {
     vi.mocked(knownHostsStore.loadKnownHosts)
       .mockResolvedValueOnce(new Map())
