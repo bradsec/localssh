@@ -140,6 +140,22 @@ describe("Help", () => {
     expect(setupLink).toHaveFocus();
   });
 
+  // On a narrow screen the Help button is folded into a closed Actions menu, so
+  // a Learn more link must open Help without that button on the page.
+  it("opens from Learn more when no Help button is mounted", async () => {
+    render(
+      <HelpProvider>
+        <LearnMore topic="files" />
+      </HelpProvider>,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: /learn more/i }));
+
+    const dialog = screen.getByRole("dialog", { name: "Help with localssh" });
+    expect(
+      within(dialog).getByRole("heading", { name: "Browse and transfer files" }),
+    ).toBeVisible();
+  });
+
   it("renders Learn more as nothing outside a provider", () => {
     const { container } = render(<LearnMore topic="connect" />);
     expect(container).toBeEmptyDOMElement();

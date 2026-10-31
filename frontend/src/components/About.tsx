@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { APP_VERSION } from "../appVersion.js";
-import { Icon } from "./Icon.js";
+import { Info } from "lucide-react";
 
 const REPOSITORY_URL = "https://github.com/bradsec/localssh";
 
@@ -40,7 +40,7 @@ export function About() {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary role="button">
-        <Icon name="info" />
+        <Info />
         <span className="toolbar-label">About</span>
       </summary>
       <div className="about__panel">

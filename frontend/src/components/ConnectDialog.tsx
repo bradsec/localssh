@@ -1,5 +1,4 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import { APP_VERSION } from "../appVersion.js";
 import { SavedHosts } from "./SavedHosts.js";
 import type { VaultApi } from "../vault/useVault.js";
 import type { SavedEntry } from "../vault/vaultEngine.js";
@@ -134,155 +133,151 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
     else usernameRef.current?.focus();
   }
 
+  const privacyNote =
+    vault.status === "locked" ? (
+      <>
+        <strong>Saved hosts are locked</strong>
+        <span>Enter your master password to view them.</span>
+      </>
+    ) : vault.status === "unavailable" ? (
+      <>
+        <strong>Saved hosts are unavailable</strong>
+        <span>Allow browser storage to save hosts, or connect without saving.</span>
+      </>
+    ) : storesAPassword ? (
+      <>
+        <strong>Saved passwords on this device</strong>
+        <span>
+          Saved passwords are encrypted in this browser. The SSH server receives your password
+          through the encrypted connection. The relay cannot read it.
+        </span>
+      </>
+    ) : null;
+
   return (
     <section className="connect-panel" aria-labelledby="connect-title">
-      <div className="connect-panel__intro">
-        <p className="connect-kicker">New session</p>
+      <div className="connect-panel__main">
         <h1 id="connect-title">Connect to your server</h1>
-        <p>Open a secure SSH terminal without sending credentials to an application server.</p>
-        <div className="privacy-note">
-          {vault.status === "locked" ? (
-            <>
-              <strong>Saved hosts are locked</strong>
-              <span>Enter your master password to view them.</span>
-            </>
-          ) : vault.status === "unavailable" ? (
-            <>
-              <strong>Saved hosts are unavailable</strong>
-              <span>Allow browser storage to save hosts, or connect without saving.</span>
-            </>
-          ) : storesAPassword ? (
-            <>
-              <strong>Saved passwords on this device</strong>
-              <span>
-                Saved passwords are encrypted in this browser. The SSH server receives your password
-                through the encrypted connection. The relay cannot read it.
-              </span>
-            </>
-          ) : null}
-        </div>
-        <p className="connect-version">Version {APP_VERSION}</p>
-      </div>
-
-      <form className="connect-form" onSubmit={handleSubmit}>
-        <h2>Connection details</h2>
-        <label className="field connect-form__host">
-          <span>Host</span>
-          <input
-            value={host}
-            onChange={(event) => setHost(event.target.value)}
-            autoComplete="off"
-            inputMode="url"
-            placeholder="server.example.com"
-            required
-          />
-        </label>
-        <label className="field connect-form__port">
-          <span>Port</span>
-          <input
-            type="number"
-            min={1}
-            max={65535}
-            value={port}
-            onChange={(event) => setPort(event.target.value)}
-            inputMode="numeric"
-            required
-          />
-        </label>
-        <label className="field connect-form__username">
-          <span>Username</span>
-          <input
-            ref={usernameRef}
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoComplete="username"
-            required
-          />
-        </label>
-        <fieldset className="connect-form__auth">
-          <legend>Authentication method</legend>
-          <label>
+        <form className="connect-form" onSubmit={handleSubmit}>
+          <label className="field connect-form__host">
+            <span>Host</span>
             <input
-              type="radio"
-              name="auth-method"
-              checked={method === "password"}
-              onChange={() => setMethod("password")}
-            />
-            Password<span className="visually-hidden"> authentication</span>
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="auth-method"
-              checked={method === "key"}
-              onChange={() => setMethod("key")}
-            />
-            Private key
-          </label>
-        </fieldset>
-        {method === "password" ? (
-          <label className="field connect-form__password">
-            <span>Password</span>
-            <input
-              ref={passwordRef}
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
+              value={host}
+              onChange={(event) => setHost(event.target.value)}
+              autoComplete="off"
+              inputMode="url"
+              placeholder="server.example.com"
               required
             />
           </label>
-        ) : (
-          <>
-            <label className="field connect-form__key">
-              <span>Private-key file</span>
+          <label className="field connect-form__port">
+            <span>Port</span>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={port}
+              onChange={(event) => setPort(event.target.value)}
+              inputMode="numeric"
+              required
+            />
+          </label>
+          <label className="field connect-form__username">
+            <span>Username</span>
+            <input
+              ref={usernameRef}
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
+              required
+            />
+          </label>
+          <fieldset className="connect-form__auth">
+            <legend>Authentication method</legend>
+            <label>
               <input
-                ref={keyFileRef}
-                type="file"
-                onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)}
+                type="radio"
+                name="auth-method"
+                checked={method === "password"}
+                onChange={() => setMethod("password")}
               />
+              Password<span className="visually-hidden"> authentication</span>
             </label>
-            <p>
-              Select a private key from this device. localssh does not save the key or passphrase.
-            </p>
-            <p>
-              Supported formats: OpenSSH Ed25519, ECDSA, or RSA (passphrase optional); unencrypted
-              PKCS#8 PEM; legacy RSA or EC PEM (passphrase optional).
-            </p>
-            <label className="field connect-form__key">
-              <span>Or paste the private key</span>
-              <textarea
-                value={pastedKey}
-                onChange={(event) => setPastedKey(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-            <label className="field connect-form__key">
-              <span>Key passphrase</span>
+            <label>
               <input
+                type="radio"
+                name="auth-method"
+                checked={method === "key"}
+                onChange={() => setMethod("key")}
+              />
+              Private key
+            </label>
+          </fieldset>
+          {method === "password" ? (
+            <label className="field connect-form__password">
+              <span>Password</span>
+              <input
+                ref={passwordRef}
                 type="password"
-                value={passphrase}
-                onChange={(event) => setPassphrase(event.target.value)}
-                autoComplete="off"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                required
               />
             </label>
-            {keyError && <p role="alert">{keyError}</p>}
-          </>
-        )}
-        <button
-          className="button button--primary connect-form__submit"
-          type="submit"
-          disabled={disabled || readingKey}
-        >
-          {readingKey
-            ? "Reading private key..."
-            : disabled
-              ? "Connecting to server..."
-              : "Connect to server"}
-        </button>
-        {error}
-      </form>
+          ) : (
+            <>
+              <label className="field connect-form__key">
+                <span>Private-key file</span>
+                <input
+                  ref={keyFileRef}
+                  type="file"
+                  onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              <p>
+                Select a private key from this device. localssh does not save the key or passphrase.
+              </p>
+              <p>
+                Supported formats: OpenSSH Ed25519, ECDSA, or RSA (passphrase optional); unencrypted
+                PKCS#8 PEM; legacy RSA or EC PEM (passphrase optional).
+              </p>
+              <label className="field connect-form__key">
+                <span>Or paste the private key</span>
+                <textarea
+                  value={pastedKey}
+                  onChange={(event) => setPastedKey(event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="field connect-form__key">
+                <span>Key passphrase</span>
+                <input
+                  type="password"
+                  value={passphrase}
+                  onChange={(event) => setPassphrase(event.target.value)}
+                  autoComplete="off"
+                />
+              </label>
+              {keyError && <p role="alert">{keyError}</p>}
+            </>
+          )}
+          <button
+            className="button button--primary connect-form__submit"
+            type="submit"
+            disabled={disabled || readingKey}
+          >
+            {readingKey
+              ? "Reading private key..."
+              : disabled
+                ? "Connecting to server..."
+                : "Connect to server"}
+          </button>
+          {error}
+        </form>
+        {privacyNote && <div className="privacy-note">{privacyNote}</div>}
+      </div>
       <SavedHosts
         vault={vault}
         current={{ host, port: Number(port), username }}

@@ -56,6 +56,8 @@ test("a touch selection survives the keyboard closing and can be copied", async 
     { x: screen.x + screen.width / 2, y: rowY },
   );
 
+  // At phone width the session controls sit behind Actions.
+  await page.getByRole("button", { name: "Actions" }).tap();
   const clipboard = page.getByRole("button", { name: /^clipboard/i });
   await expect(clipboard).toHaveAccessibleName(/selection ready to copy/i);
 

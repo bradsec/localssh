@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { TERMINAL_FONTS } from "../terminalFonts.js";
 import { TERMINAL_THEMES } from "../terminalThemes.js";
 import type { TerminalSettings } from "../storage/settingsStore.js";
-import { Icon } from "./Icon.js";
+import { Palette } from "lucide-react";
 
 export interface TerminalSettingsProps {
   value: TerminalSettings;
@@ -50,7 +50,7 @@ export function TerminalSettings({ value, onChange }: TerminalSettingsProps) {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary role="button">
-        <Icon name="palette" />
+        <Palette />
         <span className="toolbar-label">Appearance</span>
       </summary>
       <fieldset>

@@ -89,6 +89,20 @@ function usePointer(kind: "coarse" | "fine") {
   })) as typeof window.matchMedia;
 }
 
+/** A screen below the desktop breakpoint, where the session toolbar folds into Actions. */
+function useNarrowScreen() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("max-width: 1023px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
 /** Fills in the connect form and waits for the session to be up. */
 async function submitConnect(user: ReturnType<typeof userEvent.setup>, host: string) {
   await user.type(screen.getByLabelText(/^host$/i), host);
@@ -634,11 +648,22 @@ describe("App", () => {
     expect(document.querySelector(".app-shell")).not.toHaveClass("app-shell--session");
   });
 
-  // Which build someone is running is the first question when reporting a bug,
-  // and the connect panel is the one screen every user sees.
-  it("shows the running version on the connect panel", () => {
+  // Which build someone is running is the first question when reporting a bug.
+  // About is in the toolbar on every screen, so the version lives there rather
+  // than as a footer on the connect form.
+  it("shows the running version in About", async () => {
     render(<App />);
-    expect(screen.getByText(`Version ${APP_VERSION}`)).toBeInTheDocument();
+    expect(screen.queryByText(`Version ${APP_VERSION}`)).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "About" }));
+    const about = screen.getByText("Version").closest("dl")!;
+    expect(within(about).getByText(APP_VERSION)).toBeVisible();
+  });
+
+  // An idle connect form has no connection to report, so it shows no status.
+  it("does not label the idle connect view as offline", () => {
+    render(<App />);
+    expect(screen.queryByText("Offline")).not.toBeInTheDocument();
   });
 
   it("does not offer plaintext host memory", () => {
@@ -685,6 +710,53 @@ describe("App", () => {
   // The bar stands in for keys the touch device has no other way to send, so it
   // belongs to a running session on such a device whether or not the on-screen
   // keyboard happens to be open.
+  // On a narrow screen the session controls do not fit beside the brand and the
+  // target, so they sit behind one Actions button instead of overlapping.
+  it("folds the session controls into Actions on a narrow screen", async () => {
+    useNarrowScreen();
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    // The connect view keeps its three controls in the toolbar.
+    expect(screen.queryByRole("button", { name: "Actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Help" })).toBeInTheDocument();
+
+    await submitConnect(user, "10.0.0.30");
+    const actions = await screen.findByRole("button", { name: "Actions" });
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("admin@10.0.0.30:22")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(actions);
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+    const panel = screen.getByRole("group", { name: "Actions" });
+    for (const name of ["Files", "Disconnect", "Clipboard", "Appearance", "Help", "About"]) {
+      expect(within(panel).getByRole("button", { name })).toBeInTheDocument();
+    }
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("group", { name: "Actions" })).not.toBeInTheDocument();
+    expect(actions).toHaveFocus();
+
+    await user.click(actions);
+    await user.click(
+      within(screen.getByRole("group", { name: "Actions" })).getByRole("button", { name: "Files" }),
+    );
+    expect(screen.getByRole("region", { name: "Files" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Actions" })).not.toBeInTheDocument();
+
+    await user.click(actions);
+    await user.click(
+      within(screen.getByRole("group", { name: "Actions" })).getByRole("button", {
+        name: "Disconnect",
+      }),
+    );
+    expect(handle.close).toHaveBeenCalled();
+  });
+
   it("shows the key bar for a touch session and takes it away with the session", async () => {
     usePointer("coarse");
     const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
@@ -729,8 +801,10 @@ describe("App", () => {
     expect(hideKeyboard.querySelector('[data-testid="keyboard-dismiss-cue"]')).not.toBeNull();
     const hiddenStateIcons = hideKeyboard.querySelectorAll("svg");
     expect(hiddenStateIcons).toHaveLength(2);
+    expect(hideKeyboard.querySelector("svg.lucide-keyboard")).not.toBeNull();
+    expect(hideKeyboard.querySelector("svg.lucide-chevron-down")).not.toBeNull();
     for (const icon of hiddenStateIcons) {
-      expect(icon).toHaveAttribute("viewBox", "0 -960 960 960");
+      expect(icon).toHaveAttribute("aria-hidden", "true");
     }
     await user.click(hideKeyboard);
     expect(terminalBlur).toHaveBeenCalled();
@@ -740,7 +814,8 @@ describe("App", () => {
     const showKeyboard = screen.getByRole("button", { name: /show keyboard/i });
     expect(showKeyboard).toHaveAttribute("aria-pressed", "false");
     expect(showKeyboard.querySelector('[data-testid="keyboard-dismiss-cue"]')).toBeNull();
-    expect(showKeyboard.querySelectorAll('svg[viewBox="0 -960 960 960"]')).toHaveLength(1);
+    expect(showKeyboard.querySelectorAll("svg")).toHaveLength(1);
+    expect(showKeyboard.querySelector("svg.lucide-keyboard")).not.toBeNull();
     await user.click(showKeyboard);
     expect(terminalFocus).toHaveBeenCalled();
   });

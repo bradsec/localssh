@@ -36,7 +36,8 @@ to switch shells; closing a tab disconnects only that shell. Closing the page
 disconnects all sessions. Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch
 tabs with a hardware keyboard.
 
-Select **Files** in a connected tab to browse that server over SFTP. Enter a
+Select **Files** in a connected tab to browse that server over SFTP. Below 1024px
+wide, Files, Disconnect, and Clipboard are under **Actions** in the toolbar. Enter a
 **Remote path**, open a folder or link to a folder, or select **Up**. Choose
 **Upload file** to send one file. localssh asks before replacing an existing
 name. Choose **Download file** beside a remote file to save it. **Cancel** stops

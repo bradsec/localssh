@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { LearnMore } from "./Help.js";
-import { Icon } from "./Icon.js";
+import { KeyRound, TriangleAlert } from "lucide-react";
 
 export interface HostKeyPromptProps {
   hostPort: string;
@@ -92,7 +92,7 @@ export function HostKeyPrompt({
         {changed ? (
           <>
             <p className="dialog-label dialog-label--danger">
-              <Icon name="warning" size={16} />
+              <TriangleAlert size={16} />
               Security warning
             </p>
             <h2 id="host-key-title">Host key changed</h2>
@@ -134,7 +134,7 @@ export function HostKeyPrompt({
         ) : (
           <>
             <p className="dialog-label">
-              <Icon name="key" size={16} />
+              <KeyRound size={16} />
               First connection
             </p>
             <h2 id="host-key-title">Verify host key</h2>

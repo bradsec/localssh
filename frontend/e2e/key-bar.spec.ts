@@ -64,6 +64,8 @@ test("supplies terminal keys for the whole session, keyboard or not", async ({ p
     barBox!.y + 1,
   );
 
+  // At phone width Disconnect sits behind Actions.
+  await page.getByRole("button", { name: "Actions" }).tap();
   await page.getByRole("button", { name: /disconnect/i }).tap();
   await expect(keyBar).toBeHidden();
 });

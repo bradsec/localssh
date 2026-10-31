@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { FolderOpen, LogOut, LucideProvider, Plus, X } from "lucide-react";
+import { ActionsMenu } from "./components/ActionsMenu.js";
 import { About } from "./components/About.js";
 import { ClipboardMenu } from "./components/ClipboardMenu.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
@@ -6,7 +8,6 @@ import { ConnectionError } from "./components/ConnectionError.js";
 import { FilePanel } from "./components/FilePanel.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
 import { Help, HelpProvider } from "./components/Help.js";
-import { Icon } from "./components/Icon.js";
 import { KeyBar } from "./components/KeyBar.js";
 import { Terminal, type TerminalControls } from "./components/Terminal.js";
 import { TerminalSettings as TerminalSettingsControl } from "./components/TerminalSettings.js";
@@ -38,6 +39,24 @@ const ENCODER = new TextEncoder();
  */
 function hasTouchPointer(): boolean {
   return window.matchMedia?.("(pointer: coarse)").matches ?? false;
+}
+
+/**
+ * Below the desktop breakpoint the session controls do not fit in one row next
+ * to the brand and the target, so they move into the Actions menu.
+ */
+const COMPACT_TOOLBAR_QUERY = "(max-width: 1023px)";
+
+function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const list = window.matchMedia?.(query);
+      list?.addEventListener?.("change", onChange);
+      return () => list?.removeEventListener?.("change", onChange);
+    },
+    () => window.matchMedia?.(query).matches ?? false,
+    () => false,
+  );
 }
 
 type Status =
@@ -87,6 +106,7 @@ export function App() {
   const nextTabIdRef = useRef(0);
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
   const [touchPointer] = useState(hasTouchPointer);
+  const compactToolbar = useMediaQuery(COMPACT_TOOLBAR_QUERY);
   const [terminalFocused, setTerminalFocused] = useState(false);
   const [terminalHasSelection, setTerminalHasSelection] = useState(false);
   const [modifiers, setModifiers] = useState<ModifierState>(NO_MODIFIERS);
@@ -381,260 +401,277 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   });
 
+  const connectionLabel = activeTab
+    ? activeTab.handle
+      ? "Connected"
+      : "Offline"
+    : status.kind === "connecting"
+      ? "Connecting"
+      : "";
+
+  const toggleFiles = (id: number) =>
+    setFileTabs((open) => {
+      const next = new Set(open);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  /** The controls for the live session, followed by the ones every screen has. */
+  const toolbarControls = (afterAction: () => void = () => {}) => (
+    <>
+      {activeTab?.handle && (
+        <button
+          className="toolbar-button"
+          type="button"
+          aria-pressed={fileTabs.has(activeTab.id)}
+          onClick={() => {
+            toggleFiles(activeTab.id);
+            afterAction();
+          }}
+        >
+          <FolderOpen />
+          <span>Files</span>
+        </button>
+      )}
+      {activeTab?.handle && (
+        <button
+          className="toolbar-button"
+          type="button"
+          onClick={() => {
+            closeTab(activeTab.id);
+            afterAction();
+          }}
+        >
+          <LogOut />
+          <span>Disconnect</span>
+        </button>
+      )}
+      {activeTab?.handle && (
+        <ClipboardMenu
+          hasSelection={terminalHasSelection}
+          getSelection={() => currentTab()?.controls?.getSelection() ?? ""}
+          onPaste={(text) => currentTab()?.controls?.paste(text)}
+        />
+      )}
+      <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
+      <Help />
+      <About />
+    </>
+  );
+
   return (
-    <HelpProvider>
-      <main className={activeTab ? "app-shell app-shell--session" : "app-shell app-shell--connect"}>
-        <header className="app-toolbar">
-          <div className="brand-lockup">
-            <span className="brand-mark" aria-hidden="true">
-              &gt;_
-            </span>
+    <LucideProvider size={18} strokeWidth={2} className="icon">
+      <HelpProvider>
+        <main
+          className={activeTab ? "app-shell app-shell--session" : "app-shell app-shell--connect"}
+        >
+          <header className="app-toolbar">
             <span className="toolbar-brand">localssh</span>
-          </div>
-          <div className="session-identity">
-            <span
-              className={`connection-status connection-status--${activeTab?.handle ? "connected" : status.kind}`}
-              aria-live="polite"
-            >
-              {activeTab
-                ? activeTab.handle
-                  ? "Connected"
-                  : "Offline"
-                : status.kind === "connecting"
-                  ? "Connecting"
-                  : "Offline"}
-            </span>
-            {activeTab && <span className="active-target">{activeTab.target}</span>}
-          </div>
-          <div className="toolbar-actions">
-            {activeTab?.handle && (
+            <div className="session-identity">
+              <span className="connection-status" aria-live="polite">
+                {connectionLabel}
+              </span>
+              {activeTab && <span className="active-target">{activeTab.target}</span>}
+            </div>
+            {activeTab && compactToolbar ? (
+              <ActionsMenu>{(close) => toolbarControls(close)}</ActionsMenu>
+            ) : (
+              <div className="toolbar-actions">{toolbarControls()}</div>
+            )}
+          </header>
+
+          {tabs.length > 0 && (
+            <div className="terminal-tabs" role="tablist" aria-label="Open terminals">
+              {tabs.map((tab) => (
+                <div className="terminal-tabs__item" key={tab.id}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeId === tab.id}
+                    aria-controls={`terminal-panel-${tab.id}`}
+                    aria-label={`${tab.host}, ${tab.handle ? "connected" : tab.connecting ? "connecting" : "disconnected"}`}
+                    onClick={() => selectTab(tab.id)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                      event.preventDefault();
+                      const index = tabs.findIndex((entry) => entry.id === tab.id);
+                      const next =
+                        tabs[
+                          (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+                            tabs.length
+                        ];
+                      if (next) {
+                        selectTab(next.id, false);
+                        document
+                          .querySelector<HTMLElement>(`[aria-controls="terminal-panel-${next.id}"]`)
+                          ?.focus();
+                      }
+                    }}
+                  >
+                    {tab.connecting ? `Connecting to ${tab.host}...` : tab.host}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Close ${tab.host} terminal`}
+                    onClick={() => closeTab(tab.id)}
+                  >
+                    <X />
+                  </button>
+                </div>
+              ))}
               <button
-                className="toolbar-button"
+                className="terminal-tabs__new"
                 type="button"
-                aria-pressed={fileTabs.has(activeTab.id)}
+                disabled={status.kind === "connecting" || status.kind === "unknown-host"}
                 onClick={() => {
-                  setFileTabs((open) => {
-                    const next = new Set(open);
-                    if (next.has(activeTab.id)) next.delete(activeTab.id);
-                    else next.add(activeTab.id);
-                    return next;
-                  });
+                  setStatus({ kind: "idle" });
+                  selectTab(null);
                 }}
               >
-                Files
+                <Plus />
+                <span>New terminal</span>
               </button>
-            )}
-            {activeTab?.handle && (
-              <button
-                className="toolbar-button"
-                type="button"
-                onClick={() => closeTab(activeTab.id)}
-              >
-                <Icon name="logout" />
-                <span>Disconnect</span>
-              </button>
-            )}
-            {activeTab?.handle && (
-              <ClipboardMenu
-                hasSelection={terminalHasSelection}
-                getSelection={() => currentTab()?.controls?.getSelection() ?? ""}
-                onPaste={(text) => currentTab()?.controls?.paste(text)}
-              />
-            )}
-            <TerminalSettingsControl value={terminalSettings} onChange={updateTerminalSettings} />
-            <Help />
-            <About />
-          </div>
-        </header>
-
-        {tabs.length > 0 && (
-          <div className="terminal-tabs" role="tablist" aria-label="Open terminals">
-            {tabs.map((tab) => (
-              <div className="terminal-tabs__item" key={tab.id}>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeId === tab.id}
-                  aria-controls={`terminal-panel-${tab.id}`}
-                  aria-label={`${tab.host}, ${tab.handle ? "connected" : tab.connecting ? "connecting" : "disconnected"}`}
-                  onClick={() => selectTab(tab.id)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                    event.preventDefault();
-                    const index = tabs.findIndex((entry) => entry.id === tab.id);
-                    const next =
-                      tabs[
-                        (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
-                      ];
-                    if (next) {
-                      selectTab(next.id, false);
-                      document
-                        .querySelector<HTMLElement>(`[aria-controls="terminal-panel-${next.id}"]`)
-                        ?.focus();
-                    }
-                  }}
-                >
-                  {tab.connecting ? `Connecting to ${tab.host}...` : tab.host}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Close ${tab.host} terminal`}
-                  onClick={() => closeTab(tab.id)}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            <button
-              className="terminal-tabs__new"
-              type="button"
-              disabled={status.kind === "connecting" || status.kind === "unknown-host"}
-              onClick={() => {
-                setStatus({ kind: "idle" });
-                selectTab(null);
-              }}
-            >
-              New terminal
-            </button>
-          </div>
-        )}
-        {notice && (
-          <p className="terminal-tabs__notice" role="status">
-            {notice}
-          </p>
-        )}
-
-        <div className="workspace">
-          {!activeTab && (
-            <>
-              {tabs.length === 0 && hasOpenedTerminal && (
-                <p className="terminal-empty">
-                  No open terminals. Connect to a server to start one.
-                </p>
-              )}
-              <ConnectDialog
-                vault={vault}
-                onConnect={attemptConnect}
-                disabled={status.kind === "connecting"}
-                error={status.kind === "error" ? <ConnectionError raw={status.message} /> : null}
-              />
-            </>
+            </div>
           )}
-          {activeTab?.inputError && (
-            <p className="connection-error" role="alert">
-              {activeTab.inputError}
+          {notice && (
+            <p className="terminal-tabs__notice" role="status">
+              {notice}
             </p>
           )}
-          {activeTab?.lostReason && <ConnectionError raw={activeTab.lostReason} />}
-          {tabs.length === 0 && (
-            <div className="terminal-frame" aria-label="SSH terminal" hidden>
-              <div className="terminal-frame__viewport">
-                <Terminal
-                  onReady={() => {}}
-                  onInput={() => {}}
-                  onResize={(cols, rows) => {
-                    terminalSizeRef.current = { cols, rows };
-                  }}
-                  fontSize={terminalSettings.fontSize}
-                  fontFamily={terminalSettings.fontFamily}
-                  theme={terminalTheme}
-                  active={false}
-                />
-              </div>
-            </div>
-          )}
-          {tabs.map((tab) => (
-            <div
-              className={`terminal-frame${fileTabs.has(tab.id) ? " terminal-frame--files" : ""}`}
-              id={`terminal-panel-${tab.id}`}
-              role="tabpanel"
-              aria-label={`${tab.host} terminal`}
-              key={tab.id}
-              hidden={activeId !== tab.id}
-            >
-              <div className="terminal-frame__viewport">
-                <Terminal
-                  onReady={(controls) => {
-                    tab.controls = controls;
-                    for (const chunk of tab.pendingData) controls.write(chunk);
-                    tab.pendingData = [];
-                  }}
-                  onInput={(data) => {
-                    if (activeIdRef.current === tab.id) sendInput(data);
-                  }}
-                  onFocusChange={(focused) => {
-                    if (activeIdRef.current === tab.id) setTerminalFocused(focused);
-                  }}
-                  onSelectionChange={(selected) => {
-                    if (activeIdRef.current === tab.id) setTerminalHasSelection(selected);
-                  }}
-                  onResize={(cols, rows) => {
-                    tab.size = { cols, rows };
-                    tab.handle?.resize(cols, rows);
-                  }}
-                  fontSize={terminalSettings.fontSize}
-                  fontFamily={terminalSettings.fontFamily}
-                  theme={terminalTheme}
-                  active={activeId === tab.id && !!tab.handle}
-                />
-              </div>
-              {fileTabs.has(tab.id) && tab.handle && (
-                <FilePanel
-                  handle={tab.handle}
-                  onClose={() => {
-                    setFileTabs((open) => {
-                      const next = new Set(open);
-                      next.delete(tab.id);
-                      return next;
-                    });
-                  }}
-                />
-              )}
-            </div>
-          ))}
-        </div>
 
-        {/* The bar rides on the shell, which is pinned to the visual viewport, so
+          <div className="workspace">
+            {!activeTab && (
+              <>
+                {tabs.length === 0 && hasOpenedTerminal && (
+                  <p className="terminal-empty">
+                    No open terminals. Connect to a server to start one.
+                  </p>
+                )}
+                <ConnectDialog
+                  vault={vault}
+                  onConnect={attemptConnect}
+                  disabled={status.kind === "connecting"}
+                  error={status.kind === "error" ? <ConnectionError raw={status.message} /> : null}
+                />
+              </>
+            )}
+            {activeTab?.inputError && (
+              <p className="connection-error" role="alert">
+                {activeTab.inputError}
+              </p>
+            )}
+            {activeTab?.lostReason && <ConnectionError raw={activeTab.lostReason} />}
+            {tabs.length === 0 && (
+              <div className="terminal-frame" aria-label="SSH terminal" hidden>
+                <div className="terminal-frame__viewport">
+                  <Terminal
+                    onReady={() => {}}
+                    onInput={() => {}}
+                    onResize={(cols, rows) => {
+                      terminalSizeRef.current = { cols, rows };
+                    }}
+                    fontSize={terminalSettings.fontSize}
+                    fontFamily={terminalSettings.fontFamily}
+                    theme={terminalTheme}
+                    active={false}
+                  />
+                </div>
+              </div>
+            )}
+            {tabs.map((tab) => (
+              <div
+                className={`terminal-frame${fileTabs.has(tab.id) ? " terminal-frame--files" : ""}`}
+                id={`terminal-panel-${tab.id}`}
+                role="tabpanel"
+                aria-label={`${tab.host} terminal`}
+                key={tab.id}
+                hidden={activeId !== tab.id}
+              >
+                <div className="terminal-frame__viewport">
+                  <Terminal
+                    onReady={(controls) => {
+                      tab.controls = controls;
+                      for (const chunk of tab.pendingData) controls.write(chunk);
+                      tab.pendingData = [];
+                    }}
+                    onInput={(data) => {
+                      if (activeIdRef.current === tab.id) sendInput(data);
+                    }}
+                    onFocusChange={(focused) => {
+                      if (activeIdRef.current === tab.id) setTerminalFocused(focused);
+                    }}
+                    onSelectionChange={(selected) => {
+                      if (activeIdRef.current === tab.id) setTerminalHasSelection(selected);
+                    }}
+                    onResize={(cols, rows) => {
+                      tab.size = { cols, rows };
+                      tab.handle?.resize(cols, rows);
+                    }}
+                    fontSize={terminalSettings.fontSize}
+                    fontFamily={terminalSettings.fontFamily}
+                    theme={terminalTheme}
+                    active={activeId === tab.id && !!tab.handle}
+                  />
+                </div>
+                {fileTabs.has(tab.id) && tab.handle && (
+                  <FilePanel
+                    handle={tab.handle}
+                    onClose={() => {
+                      setFileTabs((open) => {
+                        const next = new Set(open);
+                        next.delete(tab.id);
+                        return next;
+                      });
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* The bar rides on the shell, which is pinned to the visual viewport, so
           it sits directly above the on-screen keyboard whenever that is open.
           It stays up when the keyboard is not: its keys write to the session
           without going through the terminal's focus, so a previous command can
           be recalled and run from the bar alone. */}
-        {activeTab?.handle && touchPointer && (
-          <KeyBar
-            modifiers={modifiers}
-            keyboardUp={terminalFocused}
-            onToggleKeyboard={toggleKeyboard}
-            onToggleModifier={toggleModifier}
-            onKey={sendKey}
-          />
-        )}
+          {activeTab?.handle && touchPointer && (
+            <KeyBar
+              modifiers={modifiers}
+              keyboardUp={terminalFocused}
+              onToggleKeyboard={toggleKeyboard}
+              onToggleModifier={toggleModifier}
+              onKey={sendKey}
+            />
+          )}
 
-        {status.kind === "unknown-host" && !activeTab && (
-          <HostKeyPrompt
-            hostPort={status.hostPort}
-            fingerprint={status.fingerprint}
-            changed={status.changed}
-            previousFingerprint={status.previousFingerprint}
-            onTrust={trustAndRetry}
-            onSwitch={
-              tabs.some((tab) => tab.id !== status.tabId && tab.handle)
-                ? () =>
-                    selectTab(
-                      tabsRef.current.find((tab) => tab.id !== status.tabId && tab.handle)?.id ??
-                        null,
-                    )
-                : undefined
-            }
-            onCancel={() => {
-              if (status.pending.password.kind === "key")
-                status.pending.password.privateKey.fill(0);
-              tabsRef.current = tabsRef.current.filter((tab) => tab.id !== status.tabId);
-              setTabs(tabsRef.current);
-              setStatus({ kind: "idle" });
-            }}
-          />
-        )}
-      </main>
-    </HelpProvider>
+          {status.kind === "unknown-host" && !activeTab && (
+            <HostKeyPrompt
+              hostPort={status.hostPort}
+              fingerprint={status.fingerprint}
+              changed={status.changed}
+              previousFingerprint={status.previousFingerprint}
+              onTrust={trustAndRetry}
+              onSwitch={
+                tabs.some((tab) => tab.id !== status.tabId && tab.handle)
+                  ? () =>
+                      selectTab(
+                        tabsRef.current.find((tab) => tab.id !== status.tabId && tab.handle)?.id ??
+                          null,
+                      )
+                  : undefined
+              }
+              onCancel={() => {
+                if (status.pending.password.kind === "key")
+                  status.pending.password.privateKey.fill(0);
+                tabsRef.current = tabsRef.current.filter((tab) => tab.id !== status.tabId);
+                setTabs(tabsRef.current);
+                setStatus({ kind: "idle" });
+              }}
+            />
+          )}
+        </main>
+      </HelpProvider>
+    </LucideProvider>
   );
 }

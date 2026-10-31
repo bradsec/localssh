@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { LearnMore } from "./Help.js";
-import { Icon } from "./Icon.js";
+import { Ellipsis, LockKeyhole, Pencil, Plus, Trash } from "lucide-react";
 import { PasswordStrength } from "./PasswordStrength.js";
 import { SavedHostEditor } from "./SavedHostEditor.js";
 import type { VaultApi } from "../vault/useVault.js";
@@ -23,12 +23,11 @@ export function SavedHosts({ vault, current, disabled = false, onPick }: SavedHo
     <section className="saved-hosts" aria-labelledby="saved-hosts-title">
       <div className="saved-hosts__header">
         <h2 id="saved-hosts-title">
-          {vault.status === "locked" && <Icon name="lock" size={18} />}
+          {vault.status === "locked" && <LockKeyhole />}
           Saved hosts
         </h2>
         <div className="saved-hosts__header-actions">
           <span className="saved-hosts__status">
-            {vault.status === "absent" && "Optional"}
             {vault.status === "locked" && "Locked"}
             {vault.status === "unlocked" &&
               `${vault.entries.length} ${vault.entries.length === 1 ? "host" : "hosts"}`}
@@ -40,7 +39,7 @@ export function SavedHosts({ vault, current, disabled = false, onPick }: SavedHo
               disabled={vault.busy}
               onClick={() => void vault.lock()}
             >
-              <Icon name="lock" size={16} />
+              <LockKeyhole size={16} />
               Lock
             </button>
           )}
@@ -298,7 +297,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
               aria-expanded={menuFor === entry.id}
               onClick={() => setMenuFor(menuFor === entry.id ? null : entry.id)}
             >
-              <Icon name="more_horiz" />
+              <Ellipsis />
             </button>
             {menuFor === entry.id && (
               <div className="saved-hosts__menu">
@@ -309,7 +308,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
                     setMenuFor(null);
                   }}
                 >
-                  <Icon name="edit" size={18} />
+                  <Pencil />
                   Edit
                 </button>
                 <button
@@ -323,7 +322,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
                     setMenuFor(null);
                   }}
                 >
-                  <Icon name="delete" size={18} />
+                  <Trash />
                   Delete
                 </button>
               </div>
@@ -366,7 +365,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
 
       <div className="saved-hosts__actions">
         <button className="saved-hosts__add" type="button" onClick={() => setEditing(null)}>
-          <Icon name="add" size={18} />
+          <Plus />
           Save current host
         </button>
         <ChangeMasterPassword vault={vault} />

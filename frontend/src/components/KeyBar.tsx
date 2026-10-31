@@ -4,7 +4,7 @@ import {
   type ModifierState,
   type TerminalKey,
 } from "../terminalKeys.js";
-import { Icon } from "./Icon.js";
+import { ChevronDown, Keyboard } from "lucide-react";
 
 export interface KeyBarProps {
   modifiers: ModifierState;
@@ -89,30 +89,17 @@ export function KeyBar({
   );
 }
 
-/** A keyboard, gaining an arrow down out of it when tapping would dismiss it. */
+/** A keyboard, gaining a chevron down under it when tapping would dismiss it. */
 function KeyboardMark({ dismiss }: { dismiss: boolean }) {
   return (
     <>
-      <Icon name="keyboard" />
+      <Keyboard />
       {dismiss && (
-        <svg
+        <ChevronDown
           className="key-bar__keyboard-dismiss-cue"
-          viewBox="0 -960 960 960"
-          width="20"
-          height="20"
-          aria-hidden="true"
-          focusable="false"
+          size={14}
           data-testid="keyboard-dismiss-cue"
-        >
-          <path
-            d="M480-240v136m0 0 96-96m-96 96-96-96"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="64"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        />
       )}
     </>
   );

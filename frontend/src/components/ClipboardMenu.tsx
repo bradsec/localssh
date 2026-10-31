@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Clipboard } from "lucide-react";
 import { LearnMore } from "./Help.js";
 import { readClipboardText, writeClipboardText } from "../clipboard.js";
 
@@ -100,7 +101,6 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
     sendPaste(text);
   };
 
-  const indicator = copied ? "copied" : hasSelection ? "ready" : null;
   const summaryLabel = copied
     ? "Clipboard, selection copied"
     : hasSelection
@@ -125,14 +125,8 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
       }}
     >
       <summary role="button" aria-label={summaryLabel}>
-        <ClipboardMark />
+        <Clipboard />
         <span className="toolbar-label">Clipboard</span>
-        {indicator && (
-          <span
-            className={`clipboard-menu__dot clipboard-menu__dot--${indicator}`}
-            aria-hidden="true"
-          />
-        )}
       </summary>
       <div className="clipboard-menu__panel">
         <p className="clipboard-menu__hint">
@@ -192,21 +186,5 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
         {blocked && <LearnMore topic="clipboard" />}
       </div>
     </details>
-  );
-}
-
-function ClipboardMark() {
-  return (
-    <svg
-      className="icon"
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="currentColor"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M9 2a1 1 0 0 0-1 1v1H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V3a1 1 0 0 0-1-1H9Zm0 2h6v2H9V4Z" />
-    </svg>
   );
 }

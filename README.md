@@ -318,8 +318,8 @@ npm packages are private and never published, so they carry a fixed `0.0.0`
 rather than a copy of the release, and a container built by hand with no build
 argument labels itself `development`.
 
-The connect panel and the About panel both show the running version, so anyone
-can read it without inspecting the containers.
+The About panel shows the running version, so anyone can read it without
+inspecting the containers.
 
 Changing `VERSION` on `main` runs the Release workflow. It validates
 the calendar date, runs the engine, relay, frontend, and browser checks, publishes
@@ -446,7 +446,8 @@ detect silent network loss and show a connection error after missed replies.
 If a new connection needs a host-key check, **Return to open terminal** keeps
 the other shells available; select the connecting tab to resume the check.
 
-Select **Files** in a connected tab to browse that server. The panel shows the
+Select **Files** in a connected tab (under **Actions** below 1024px wide) to
+browse that server. The panel shows the
 current folder; enter a **Remote path**, select a folder (including a link to a
 folder), or select **Up** for the parent folder. Each entry shows whether it is
 a file, folder, link, broken link, or special file. Choose **Upload file** to
@@ -480,9 +481,10 @@ keeps the engine's original message.
 ## Phones and tablets
 
 The interface is built for a small touch screen as much as for a desktop
-browser. On a phone the terminal runs to the edges of the screen, the toolbar
-reflows so the session identity keeps its own line, and controls stay at or
-above the 44px touch target. Pinch-zoom is disabled over the terminal, where
+browser. On a phone the terminal runs to the edges of the screen, and controls
+stay at or above the 44px touch target. Below 1024px wide, a session toolbar
+shows the connection status and target beside one **Actions** button, which
+holds Files, Disconnect, Clipboard, Appearance, Help, and About. Pinch-zoom is disabled over the terminal, where
 zooming would hide the prompt and reflow nothing: set the font size from the
 Appearance menu instead.
 
@@ -538,7 +540,7 @@ fingers scrolls the output.
 Long-press terminal output and drag to select it. Because xterm renders to a
 canvas, Safari cannot show its native text-selection handles; localssh draws the
 selection in the terminal instead. A **Clipboard** menu sits in the session
-toolbar for copying that selection and for pasting without a hardware keyboard:
+toolbar (under **Actions** below 1024px wide) for copying that selection and for pasting without a hardware keyboard:
 
 | Control                | Action                                                     |
 | ---------------------- | ---------------------------------------------------------- |
@@ -636,9 +638,9 @@ Terminal palettes reproduce the published colours of their upstream projects:
 
 ### Interface icons
 
-Interface icons use
-[Material Symbols](https://github.com/google/material-design-icons) by Google,
-vendored as SVG paths under the Apache-2.0 licence.
+Interface icons use [Lucide](https://lucide.dev) (ISC licence), bundled from the
+`lucide-react` npm package at build time. The page makes no request for icons at
+runtime.
 
 The GitHub mark in the About panel is a trademark of GitHub, Inc., used to link
 to the project's repository.

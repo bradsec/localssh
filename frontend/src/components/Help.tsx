@@ -10,19 +10,21 @@ import {
 import { createPortal } from "react-dom";
 import { HelpContext, useHelp, type HelpApi } from "../helpContext.js";
 import { filterHelpTopics, HELP_TOPICS, helpTopicLabel, type HelpTopicId } from "../helpTopics.js";
-import { Icon } from "./Icon.js";
+import { CircleHelp } from "lucide-react";
 
 /**
  * Where focus goes when Help closes. The element that asked for Help can be
  * gone (a closed session) or hidden in a menu that closed meanwhile; the menu's
- * own toggle stands in for the second, and the Help button for the first.
+ * own toggle stands in for the second, and the Help button for the first. On a
+ * narrow screen the Help button is itself folded into Actions, whose button
+ * then takes focus.
  */
 function resolveReturnFocus(element: HTMLElement | null): HTMLElement | null {
   if (element?.isConnected && element !== document.body) {
     const closedMenu = element.closest("details:not([open])");
     return closedMenu?.querySelector<HTMLElement>("summary") ?? element;
   }
-  return document.querySelector<HTMLElement>("[data-help-trigger]");
+  return document.querySelector<HTMLElement>("[data-help-trigger], [data-actions-trigger]");
 }
 
 export function HelpProvider({ children }: { children: ReactNode }) {
@@ -55,10 +57,20 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     () => ({ ...state, openHelp, closeHelp }),
     [state, openHelp, closeHelp],
   );
-  return <HelpContext.Provider value={api}>{children}</HelpContext.Provider>;
+  return (
+    <HelpContext.Provider value={api}>
+      {children}
+      {state.isOpen &&
+        // Rendered by the provider rather than by the toolbar button, which can be
+        // folded away in a closed Actions menu while a Learn more link asks for
+        // Help. Portalled out of the toolbar, whose stacking context would
+        // otherwise keep the dialog under the host-key prompt it may be opened from.
+        createPortal(<HelpDialog topic={state.topic} onClose={closeHelp} />, document.body)}
+    </HelpContext.Provider>
+  );
 }
 
-/** The toolbar Help button and, while open, the Help dialog. */
+/** The toolbar Help button. The dialog itself belongs to HelpProvider. */
 export function Help() {
   const help = useHelp();
   // What had focus when the pointer went down on the button, before the press
@@ -85,13 +97,9 @@ export function Help() {
           help.openHelp(undefined, prior && prior !== document.body ? prior : event.currentTarget);
         }}
       >
-        <Icon name="info" />
+        <CircleHelp />
         <span className="toolbar-label">Help</span>
       </button>
-      {help.isOpen &&
-        // Portalled out of the toolbar, whose stacking context would otherwise
-        // keep the dialog under the host-key prompt it may be opened from.
-        createPortal(<HelpDialog topic={help.topic} onClose={help.closeHelp} />, document.body)}
     </>
   );
 }
@@ -181,43 +189,44 @@ function HelpDialog({ topic, onClose }: { topic: HelpTopicId | null; onClose: ()
               enterKeyHint="search"
             />
           </label>
+          <nav className="help__nav" aria-label="Help topics">
+            <ul className="help__topics">
+              {HELP_TOPICS.map((item) => (
+                <li key={item.id}>
+                  <button type="button" onClick={() => showTopic(item.id)}>
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
 
-        <nav aria-label="Help topics">
-          <ul className="help__topics">
-            {HELP_TOPICS.map((item) => (
-              <li key={item.id}>
-                <button type="button" onClick={() => showTopic(item.id)}>
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <div className="help__body">
+          <p className="help__results" aria-live="polite">
+            {trimmed === ""
+              ? ""
+              : topics.length === 0
+                ? `No help topics match "${trimmed}". Try another word, or clear the search.`
+                : `${topics.length} ${topics.length === 1 ? "topic matches" : "topics match"} "${trimmed}".`}
+          </p>
 
-        <p className="help__results" aria-live="polite">
-          {trimmed === ""
-            ? ""
-            : topics.length === 0
-              ? `No help topics match "${trimmed}". Try another word, or clear the search.`
-              : `${topics.length} ${topics.length === 1 ? "topic matches" : "topics match"} "${trimmed}".`}
-        </p>
-
-        {topics.map((item) => (
-          <section key={item.id} id={`help-${item.id}`} aria-labelledby={`help-${item.id}-title`}>
-            <h3 id={`help-${item.id}-title`} tabIndex={-1}>
-              {item.heading}
-            </h3>
-            {item.paragraphs.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
-            {item.link && (
-              <a href={item.link.href} target="_blank" rel="noreferrer noopener">
-                {item.link.text}
-              </a>
-            )}
-          </section>
-        ))}
+          {topics.map((item) => (
+            <section key={item.id} id={`help-${item.id}`} aria-labelledby={`help-${item.id}-title`}>
+              <h3 id={`help-${item.id}-title`} tabIndex={-1}>
+                {item.heading}
+              </h3>
+              {item.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+              {item.link && (
+                <a href={item.link.href} target="_blank" rel="noreferrer noopener">
+                  {item.link.text}
+                </a>
+              )}
+            </section>
+          ))}
+        </div>
       </section>
     </div>
   );
