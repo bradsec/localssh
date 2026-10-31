@@ -26,6 +26,8 @@ others discover the project.
 - **Configurable terminal.** The [terminal](#terminal) supports selectable font
   size, system or bundled monospace fonts, persistent colour schemes,
   scrollback, automatic PTY resizing, and full-screen sessions.
+- **Multiple live terminals.** Open another server without closing current
+  shells. Each tab has its own SSH session, output, and terminal size.
 - **Phone and tablet controls.** The responsive interface includes a
   [touch key bar](#key-bar), sticky Ctrl and Alt modifiers, terminal gestures, a
   [clipboard menu](#clipboard), keyboard-aware viewport fitting, and 44px touch
@@ -353,6 +355,15 @@ as optional bundled fonts. Font size is a picker, which a phone renders as a
 scroll wheel. The terminal reports its fitted size to the remote PTY, so
 resizing the window, rotating a phone, or opening an on-screen keyboard keeps
 width-aware commands formatting correctly.
+
+Select **New terminal** to connect to another server. Select a tab to switch
+shells, or its close button to disconnect only that shell. On a hardware
+keyboard, Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch tabs. Closing the
+page disconnects all sessions. If the relay reaches `MAX_SESSIONS`, close a
+terminal and try again; the relay log identifies the limit. SSH keepalives
+detect silent network loss and show a connection error after missed replies.
+If a new connection needs a host-key check, **Return to open terminal** keeps
+the other shells available; select the connecting tab to resume the check.
 
 The toolbar's Help button opens a searchable guide to connection setup,
 host-key checks, saved hosts, terminal controls, keyboard shortcuts, copy and

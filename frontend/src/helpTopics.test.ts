@@ -34,6 +34,15 @@ describe("help topics", () => {
     ]);
   });
 
+  it("explains terminal tabs and the session limit in offline Help", () => {
+    const terminal = HELP_TOPICS.find((topic) => topic.id === "terminal");
+    const shortcuts = HELP_TOPICS.find((topic) => topic.id === "shortcuts");
+    const troubleshooting = HELP_TOPICS.find((topic) => topic.id === "troubleshooting");
+    expect(terminal?.paragraphs.join(" ")).toContain("New terminal");
+    expect(shortcuts?.paragraphs.join(" ")).toContain("Ctrl+Alt+Shift+Left");
+    expect(troubleshooting?.paragraphs.join(" ")).toContain("MAX_SESSIONS");
+  });
+
   it("returns nothing for a search that matches no topic", () => {
     expect(filterHelpTopics("kubernetes")).toEqual([]);
   });

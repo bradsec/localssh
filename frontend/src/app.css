@@ -320,6 +320,70 @@ body:has(.app-shell--connect) {
   background: var(--canvas);
 }
 
+.terminal-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  flex: none;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-tabs__item {
+  display: flex;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.terminal-tabs button {
+  min-height: 44px;
+  min-width: 44px;
+  border: 0;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.terminal-tabs [role="tab"] {
+  max-width: 180px;
+  padding: 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-tabs [aria-selected="true"] {
+  color: var(--canvas);
+  background: var(--text);
+}
+
+.terminal-tabs__new {
+  flex: none;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
+.terminal-tabs__notice {
+  margin: 0;
+  padding: 4px 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.terminal-empty {
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: center;
+  margin: 8px 16px;
+  color: var(--text-muted);
+}
+
+.terminal-frame[hidden] {
+  display: none;
+}
+
 .app-shell--connect .workspace {
   overflow: visible;
 }

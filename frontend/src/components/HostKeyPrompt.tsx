@@ -9,6 +9,7 @@ export interface HostKeyPromptProps {
   previousFingerprint?: string;
   onTrust: () => void;
   onCancel: () => void;
+  onSwitch?: () => void;
 }
 
 export function HostKeyPrompt({
@@ -18,6 +19,7 @@ export function HostKeyPrompt({
   previousFingerprint,
   onTrust,
   onCancel,
+  onSwitch,
 }: HostKeyPromptProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -158,6 +160,11 @@ export function HostKeyPrompt({
               </button>
             </div>
           </>
+        )}
+        {onSwitch && (
+          <button className="button button--secondary" type="button" onClick={onSwitch}>
+            Return to open terminal
+          </button>
         )}
       </section>
     </div>

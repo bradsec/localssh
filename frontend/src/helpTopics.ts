@@ -55,6 +55,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     label: "Terminal",
     heading: "Use the terminal",
     paragraphs: [
+      "Select New terminal to connect to another server without closing your open shells. Select a tab to use it; Close on a tab disconnects only that shell. Each tab keeps its own output and terminal size. Closing the page disconnects all shells.",
+      "If another connection needs a host-key check, select Return to open terminal to keep working. Select the connecting tab to return to the check.",
       "On a touch screen, the key bar supplies Esc, Tab, arrows, and other shell keys. Tap Ctrl or Alt once for the next key, twice to lock it, and a third time to turn it off.",
       "Swipe right for Tab or left for Esc. Flick up or down near the prompt for command history. Drag with two fingers to scroll output. Long press and drag to select text.",
       "Use Appearance to change the terminal font, size, or color scheme.",
@@ -65,6 +67,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     label: "Keyboard shortcuts",
     heading: "Keyboard shortcuts",
     paragraphs: [
+      "Use Ctrl+Alt+Shift+Left or Ctrl+Alt+Shift+Right to switch between open terminal tabs. These shortcuts work outside the terminal input as well.",
       "With a hardware keyboard, use Esc, Tab, arrow keys, and shell shortcuts as usual. Ctrl+C interrupts a command, Ctrl+D sends end of input, and Ctrl+Z suspends a job. Ctrl+R searches command history when the remote shell supports it.",
     ],
   },
@@ -82,6 +85,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     label: "Connection problems",
     heading: "Fix a connection problem",
     paragraphs: [
+      "If another terminal cannot open, the relay may have reached MAX_SESSIONS. Close a terminal you no longer need and try again. Check the relay log to distinguish this from other connection failures.",
+      "If a connected terminal stops responding after a network loss, localssh closes it after missed SSH keepalive replies. Reconnect when the network returns.",
       "If the relay cannot be reached, check that localssh is running and that you opened the right address. If you run the relay, check its logs for a refused origin, host, or port.",
       "If the SSH login fails, check the host, port, username, and password. Ask the server administrator whether the server accepts password login. If a host key changed, verify the new fingerprint before continuing.",
       "If a private key cannot be read, check its format and passphrase. If the server rejects it, check that its public key is in ~/.ssh/authorized_keys on the server, or use password login.",

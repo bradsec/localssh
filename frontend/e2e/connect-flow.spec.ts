@@ -72,6 +72,59 @@ test("connects through the relay, trusts the host key, and echoes input", async 
   await expect(page.locator(".xterm-rows")).toContainText("hello", { timeout: 5_000 });
 });
 
+test("keeps two live terminal sessions and closes only the selected one", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  const host = address.slice(0, address.lastIndexOf(":"));
+  const port = address.slice(address.lastIndexOf(":") + 1);
+  await page.goto("/");
+
+  const open = async () => {
+    await page.getByLabel(/^Host$/i).fill(host);
+    await page.getByLabel(/^Port$/i).fill(port);
+    await page.getByLabel(/^Username$/i).fill("tester");
+    await page.getByLabel(/^Password$/i).fill("s3cret");
+    await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  };
+
+  await open();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  await expect(page.getByRole("tab", { name: `${host}, connected` })).toHaveCount(1);
+  const first = page.getByRole("tabpanel", { name: `${host} terminal` }).first();
+  await first.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("first-shell");
+  await page.keyboard.press("Enter");
+  await expect(first.locator(".xterm-rows")).toContainText("first-shell");
+
+  await page.getByRole("button", { name: "New terminal" }).click();
+  await open();
+  await expect(page.getByRole("tab", { name: `${host}, connected` })).toHaveCount(2);
+  const second = page.getByRole("tabpanel", { name: `${host} terminal` }).last();
+  await second.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("second-shell");
+  await page.keyboard.press("Enter");
+  await expect(second.locator(".xterm-rows")).toContainText("second-shell");
+  await expect(second.locator(".xterm-rows")).not.toContainText("first-shell");
+
+  await page.keyboard.press("Control+Alt+Shift+ArrowLeft");
+  await expect(page.getByRole("tab", { name: `${host}, connected` }).first()).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  const tabSize = await page
+    .getByRole("tab", { name: `${host}, connected` })
+    .first()
+    .boundingBox();
+  expect(tabSize!.height).toBeGreaterThanOrEqual(44);
+
+  await page
+    .getByRole("button", { name: `Close ${host} terminal` })
+    .last()
+    .click();
+  await expect(page.getByRole("tab", { name: `${host}, connected` })).toHaveCount(1);
+  await expect(first.locator(".xterm-rows")).toContainText("first-shell");
+});
+
 test("connects with a private-key file through the relay", async ({ page }) => {
   const address = process.env.E2E_SSHD_ADDR!;
   await page.goto("/");

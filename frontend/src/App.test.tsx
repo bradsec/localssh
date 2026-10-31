@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useRef } from "react";
 import { App } from "./App.js";
 import { APP_VERSION } from "./appVersion.js";
 import { DEFAULT_FONT_FAMILY } from "./terminalFonts.js";
@@ -27,6 +28,7 @@ let terminalInput: ((data: string) => void) | undefined;
 let terminalFocusChange: ((focused: boolean) => void) | undefined;
 let terminalSelectionChange: ((hasSelection: boolean) => void) | undefined;
 const terminalPaste = vi.fn();
+const terminalWrites: ReturnType<typeof vi.fn>[] = [];
 let terminalSelectionText = "";
 
 vi.mock("./components/Terminal.js", () => ({
@@ -53,13 +55,15 @@ vi.mock("./components/Terminal.js", () => ({
     onSelectionChange?: (hasSelection: boolean) => void;
     active: boolean;
   }) => {
+    const write = useRef(vi.fn());
+    if (!terminalWrites.includes(write.current)) terminalWrites.push(write.current);
     terminalActive = active;
     terminalInput = onInput;
     terminalFocusChange = onFocusChange;
     terminalSelectionChange = onSelectionChange;
     onResize?.(48, 20);
     onReady?.({
-      write: vi.fn(),
+      write: write.current,
       reset: terminalReset,
       focus: terminalFocus,
       blur: terminalBlur,
@@ -118,9 +122,202 @@ describe("App", () => {
     terminalFocusChange = undefined;
     terminalSelectionChange = undefined;
     terminalPaste.mockClear();
+    terminalWrites.length = 0;
     terminalSelectionText = "";
     usePointer("fine");
     localStorage.clear();
+  });
+
+  it("keeps another SSH session open when a terminal tab closes", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+
+    expect(first.close).not.toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: /first.example, connected/i })).toBeVisible();
+    expect(screen.getByRole("tab", { name: /second.example, connected/i })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Close second.example terminal" }));
+    expect(second.close).toHaveBeenCalledOnce();
+    expect(first.close).not.toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: /first.example, connected/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("routes touch keys and keyboard tab switching to the selected SSH session", async () => {
+    usePointer("coarse");
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+
+    await user.click(
+      within(screen.getByRole("toolbar", { name: "Terminal keys" })).getByRole("button", {
+        name: "Escape",
+      }),
+    );
+    expect(sentBytes(second)).toBe("\u001b");
+    expect(sentBytes(first)).toBe("");
+
+    await user.keyboard("{Control>}{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}{/Control}");
+    expect(screen.getByRole("tab", { name: /first.example, connected/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(
+      within(screen.getByRole("toolbar", { name: "Terminal keys" })).getByRole("button", {
+        name: "Escape",
+      }),
+    );
+    expect(sentBytes(first)).toBe("\u001b");
+    expect(sentBytes(second)).toBe("\u001b");
+  });
+
+  it("keeps sibling tabs open when one connection drops", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+
+    const { onClose } = vi.mocked(engine.connectSession).mock.calls[1]![0];
+    act(() => onClose("connection lost"));
+
+    expect(screen.getByRole("tab", { name: /second.example, disconnected/i })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("The connection to the server was lost.");
+    await user.click(screen.getByRole("tab", { name: /first.example, connected/i }));
+    expect(first.close).not.toHaveBeenCalled();
+    expect(screen.getByText("Connected", { exact: true })).toBeInTheDocument();
+  });
+
+  it("writes background output to its own terminal buffer", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+
+    const firstData = vi.mocked(engine.connectSession).mock.calls[0]![0].onData;
+    const secondData = vi.mocked(engine.connectSession).mock.calls[1]![0].onData;
+    act(() => {
+      firstData(new Uint8Array([65]));
+      secondData(new Uint8Array([66]));
+    });
+
+    expect(terminalWrites[1]).toHaveBeenCalledWith(new Uint8Array([65]));
+    expect(terminalWrites[2]).toHaveBeenCalledWith(new Uint8Array([66]));
+    expect(terminalWrites[1]).not.toHaveBeenCalledWith(new Uint8Array([66]));
+  });
+
+  it("leaves the first session open when another connection fails", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession)
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce("could not reach the relay: session limit reached");
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await submitConnect(user, "second.example");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("MAX_SESSIONS");
+    expect(first.close).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: /first.example, connected/i }));
+    expect(screen.getByText("Connected", { exact: true })).toBeInTheDocument();
+  });
+
+  it("closes every SSH handle when the page unmounts", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const { unmount } = render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+
+    unmount();
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(second.close).toHaveBeenCalledOnce();
+  });
+
+  it("lets a user return to an open shell while another host key waits for review", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession)
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new engine.HostKeyRejectedError("second.example:22", "SHA256:other"));
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await submitConnect(user, "second.example");
+    expect(await screen.findByRole("alertdialog", { name: /verify host key/i })).toHaveTextContent(
+      "second.example:22",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Return to open terminal" }));
+    expect(screen.getByRole("tab", { name: /first.example, connected/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(first.close).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: /second.example, connecting/i }));
+    expect(screen.getByRole("alertdialog", { name: /verify host key/i })).toHaveTextContent(
+      "second.example:22",
+    );
+  });
+
+  it("closes a connection that finishes after its pending tab was removed", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const late: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    let finish!: (handle: engine.SshHandle) => void;
+    vi.mocked(engine.connectSession)
+      .mockResolvedValueOnce(first)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await submitConnect(user, "second.example");
+    await screen.findByRole("tab", { name: /second.example, connecting/i });
+
+    await user.click(screen.getByRole("button", { name: "Close second.example terminal" }));
+    await act(async () => finish(late));
+    await waitFor(() => expect(late.close).toHaveBeenCalledOnce());
+    expect(first.close).not.toHaveBeenCalled();
+  });
+
+  it("closes every SSH handle when the browser page is hidden", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first);
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(first.close).toHaveBeenCalledOnce();
   });
 
   it("renders the connect form", () => {

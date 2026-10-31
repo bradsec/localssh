@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
-const maxTerminalDimension = 65535
+const (
+	maxTerminalDimension = 65535
+	keepaliveInterval    = 15 * time.Second
+	keepaliveMaxMisses   = 3
+)
 
 // HostKeyFingerprint is the SHA256 fingerprint of a host key, in OpenSSH's
 // "SHA256:base64..." presentation form.
@@ -34,7 +40,9 @@ type Session struct {
 	// how a shell that ended on its own differs from a dropped connection.
 	exited *atomic.Bool
 	// requestsDone closes once every channel request has been read.
-	requestsDone chan struct{}
+	requestsDone      chan struct{}
+	keepaliveStop     chan struct{}
+	keepaliveStopOnce sync.Once
 }
 
 // Client returns the underlying *ssh.Client, for opening additional
@@ -136,13 +144,51 @@ func connect(ctx context.Context, conn net.Conn, hostPort, username string, auth
 		return nil, ctx.Err()
 	}
 
-	return &Session{
-		conn:         sshConn,
-		client:       client,
-		channel:      channel,
-		exited:       exited,
-		requestsDone: requestsDone,
-	}, nil
+	session := &Session{
+		conn:          sshConn,
+		client:        client,
+		channel:       channel,
+		exited:        exited,
+		requestsDone:  requestsDone,
+		keepaliveStop: make(chan struct{}),
+	}
+	go runKeepalives(session.conn, session.keepaliveStop, keepaliveInterval, keepaliveMaxMisses)
+	return session, nil
+}
+
+func runKeepalives(conn ssh.Conn, stop <-chan struct{}, interval time.Duration, maxMisses int) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var reply <-chan error
+	misses := 0
+	for {
+		select {
+		case <-stop:
+			return
+		case err := <-reply:
+			if err != nil {
+				_ = conn.Close()
+				return
+			}
+			reply = nil
+			misses = 0
+		case <-ticker.C:
+			if reply != nil {
+				misses++
+				if misses >= maxMisses {
+					_ = conn.Close()
+					return
+				}
+				continue
+			}
+			result := make(chan error, 1)
+			reply = result
+			go func() {
+				_, _, err := conn.SendRequest("keepalive@openssh.com", true, nil)
+				result <- err
+			}()
+		}
+	}
 }
 
 // RequestPTY asks the remote to allocate a pseudo-terminal of the given
@@ -243,5 +289,6 @@ func (s *Session) ExitReported() bool {
 }
 
 func (s *Session) Close() error {
+	s.keepaliveStopOnce.Do(func() { close(s.keepaliveStop) })
 	return errors.Join(s.channel.Close(), s.conn.Close())
 }
