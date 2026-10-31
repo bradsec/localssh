@@ -42,3 +42,7 @@ Checks at this state: `go test ./...` "Go test: 85 passed in 5 packages"; `GOOS=
 3. F8 measurement: run a large file through a latency-injecting proxy, comparing serial and concurrent transfer. Not done; there are no numbers yet.
 4. Help (`frontend/src/helpTopics.ts` files topic) and README (lines 371-381, "32 KiB chunks", cleanup wording) after the behavior lands.
 5. F11 and F12 deferred, as instructed.
+
+### Lead decision on F2 (2026-11-01)
+
+Accepted the builder's alternative: deleting the OPFS temp file right after the download breaks the saved file in Chromium. Remove the temp file on failure, on the next transfer, on panel close, and on `pagehide`; keep the 10-minute timer; at startup sweep only `localssh-download-*` files older than 10 minutes.
