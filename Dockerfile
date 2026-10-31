@@ -1,6 +1,6 @@
 ARG VERSION=development
 
-FROM golang:1.27.0-alpine AS engine
+FROM golang:1.27.3-alpine AS engine
 WORKDIR /src/engine
 COPY engine/go.mod engine/go.sum ./
 RUN go mod download
@@ -8,7 +8,7 @@ COPY engine/ ./
 RUN GOOS=js GOARCH=wasm go build -o dist/engine.wasm . \
     && cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" dist/wasm_exec.js
 
-FROM node:24-alpine AS frontend
+FROM node:26.13.0-alpine AS frontend
 ARG VITE_RELAY_WS_URL
 ENV VITE_RELAY_WS_URL=${VITE_RELAY_WS_URL}
 # This stage only receives frontend/, so the VERSION file the build would
@@ -22,7 +22,7 @@ COPY frontend/ ./
 COPY --from=engine /src/engine/dist /src/engine/dist
 RUN npm run build
 
-FROM nginx:1.29-alpine
+FROM nginx:1.30.6-alpine
 ARG VERSION
 LABEL org.opencontainers.image.title="localssh" \
       org.opencontainers.image.version="${VERSION}" \
