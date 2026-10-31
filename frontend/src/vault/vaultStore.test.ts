@@ -115,6 +115,14 @@ describe("vaultStore", () => {
     expect(localStorage.getItem(VAULT_STORAGE_KEY)).toBeNull();
   });
 
+  it("does not clear a vault changed by another tab", async () => {
+    localStorage.setItem(VAULT_STORAGE_KEY, validBlob);
+    const changed = JSON.stringify({ ...JSON.parse(validBlob), ct: "changed" });
+    await saveVaultBlob(changed, validBlob);
+    await expect(clearVaultBlob(validBlob)).rejects.toThrow(/changed/i);
+    expect(loadVaultBlob()).toBe(changed);
+  });
+
   it("reports storage as unavailable when it throws", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("blocked", "SecurityError");

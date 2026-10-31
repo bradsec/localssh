@@ -17,6 +17,7 @@ security model.
 Vault writes use IndexedDB to serialize changes across tabs while keeping the
 existing encrypted blob in `localStorage`. A stale save locks the vault and
 asks you to reload and unlock again; unsaved edits must be entered again.
+Reset also refuses to delete a vault changed by another tab.
 Reload all open tabs after upgrading from a version without this protection.
 
 The terminal automatically reports its fitted rows and columns to the remote

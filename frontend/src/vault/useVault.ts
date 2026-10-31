@@ -15,6 +15,7 @@ import {
   isStorageAvailable,
   loadVaultBlob,
   saveVaultBlob,
+  VAULT_STORAGE_KEY,
 } from "./vaultStore.js";
 
 export type VaultStatus = "unavailable" | "absent" | "locked" | "unlocked";
@@ -45,12 +46,19 @@ function initialStatus(): VaultStatus {
  * for the master password again.
  */
 export function useVault(): VaultApi {
+  const [initialBlob] = useState(() => {
+    try {
+      return localStorage.getItem(VAULT_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [status, setStatus] = useState<VaultStatus>(initialStatus);
   const [entries, setEntries] = useState<SavedEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const actionInFlight = useRef(false);
-  const loadedBlob = useRef<string | null>(null);
+  const loadedBlob = useRef<string | null>(initialBlob);
 
   // Every action funnels through here so that no rejection reaches a component
   // and the busy flag can never be left stuck on.
@@ -162,7 +170,7 @@ export function useVault(): VaultApi {
         await lockVault();
         setEntries([]);
         setStatus("locked");
-        await clearVaultBlob();
+        await clearVaultBlob(loadedBlob.current);
         loadedBlob.current = null;
         setStatus("absent");
       }),

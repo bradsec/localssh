@@ -77,8 +77,13 @@ export async function saveVaultBlob(blob: string, expected: string | null): Prom
   });
 }
 
-export async function clearVaultBlob(): Promise<void> {
-  await withVaultLock(() => localStorage.removeItem(VAULT_STORAGE_KEY));
+export async function clearVaultBlob(expected?: string | null): Promise<void> {
+  await withVaultLock(() => {
+    if (expected !== undefined && localStorage.getItem(VAULT_STORAGE_KEY) !== expected) {
+      throw new StaleVaultError();
+    }
+    localStorage.removeItem(VAULT_STORAGE_KEY);
+  });
 }
 
 async function withVaultLock(action: () => void): Promise<void> {

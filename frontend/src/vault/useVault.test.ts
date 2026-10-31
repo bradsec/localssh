@@ -286,6 +286,19 @@ describe("useVault", () => {
     expect(result.current.error).toMatch(/storage is unavailable/i);
   });
 
+  it("resets only the vault seen when the tab opened", async () => {
+    vi.mocked(store.hasVaultBlob).mockReturnValue(true);
+    localStorage.setItem(store.VAULT_STORAGE_KEY, "original");
+    const { result } = renderHook(() => useVault());
+    localStorage.setItem(store.VAULT_STORAGE_KEY, "changed");
+
+    await act(async () => {
+      await result.current.reset();
+    });
+
+    expect(store.clearVaultBlob).toHaveBeenCalledWith("original");
+  });
+
   it("marks itself busy while a slow derivation runs", async () => {
     vi.mocked(store.hasVaultBlob).mockReturnValue(true);
     let release: (value: { blob: string; entries: typeof entries }) => void = () => {};
