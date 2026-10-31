@@ -421,7 +421,7 @@ happens on the way to the Clipboard menu. Typing into the session clears it.
 
 ## Development
 
-Development from source requires Go 1.27 or newer and Node.js 24 or newer.
+Development from source requires Go 1.27.3 or newer and Node.js 26 or newer.
 
 ```bash
 # Engine

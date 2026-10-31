@@ -1,12 +1,7 @@
 :root {
   color-scheme: light dark;
   font-family:
-    "IBM Plex Sans",
-    "Segoe UI",
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
+    "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   color: #18201c;
   background: #e9eeeb;
   --canvas: #e9eeeb;
