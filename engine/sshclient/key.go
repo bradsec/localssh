@@ -2,6 +2,7 @@ package sshclient
 
 import (
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,10 +29,13 @@ var supportedKeyTypes = map[string]bool{
 	ssh.KeyAlgoRSA:      true,
 }
 
-// ParsePrivateKey reads an Ed25519, ECDSA, or RSA private key in OpenSSH or
-// PEM form. passphrase is used only when the key is encrypted. Errors wrap
-// ErrKeyInvalid, ErrKeyUnsupported, or ErrKeyPassphrase.
+// ParsePrivateKey reads Ed25519, ECDSA, or RSA OpenSSH keys, unencrypted PKCS#8
+// PEM keys, and legacy RSA or EC PEM keys. passphrase is used only when the
+// key is encrypted. Errors wrap ErrKeyInvalid, ErrKeyUnsupported, or ErrKeyPassphrase.
 func ParsePrivateKey(pemBytes, passphrase []byte) (ssh.Signer, error) {
+	if block, _ := pem.Decode(pemBytes); block != nil && block.Type == "ENCRYPTED PRIVATE KEY" {
+		return nil, ErrKeyUnsupported
+	}
 	signer, err := ssh.ParsePrivateKey(pemBytes)
 	var missing *ssh.PassphraseMissingError
 	if errors.As(err, &missing) {

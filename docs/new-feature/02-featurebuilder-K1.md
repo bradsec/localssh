@@ -135,3 +135,7 @@ Out of scope: FIDO2, agent forwarding, cloud sync, automatic remote key installa
 - SUSPECTED: the Vite bundle warning may merit a later size review; production build and browser tests passed.
 - Docker buildx image builds were not run because sandbox Docker state may be read-only, per session instructions.
 - Physical mobile devices, non-Ed25519 browser key files, and external SSH servers were not tested. The committed Go parser tests cover ECDSA, RSA, PEM, encrypted keys, and error classes.
+
+## Fix K1-1
+
+Encrypted PKCS#8 PEM (`ENCRYPTED PRIVATE KEY`) now returns `ErrKeyUnsupported` before passphrase parsing. The frontend offers `ssh-keygen -p -f <keyfile>` to convert the key to OpenSSH format. The pinned parser accepts OpenSSH Ed25519, ECDSA, and RSA keys with or without passphrases; unencrypted PKCS#8 PEM; and legacy RSA or EC PEM with or without passphrases. Product copy now names those formats. A test-only encrypted PKCS#8 Ed25519 fixture checks the unsupported error with correct, wrong, and absent passphrases. The OpenSSH `ssh-keygen` manual documents `-p` format conversion and OpenSSH output by default; conversion was also verified against the fixture.

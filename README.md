@@ -267,11 +267,12 @@ What this design does and does not protect you from:
 - **Typed passwords stay in memory.** A password you type lives in React state
   for the life of the connection and is never written to storage or sent to any
   origin server.
-- **Private keys stay on your device.** Select a file or paste an OpenSSH or PEM
-  Ed25519, ECDSA, or RSA key. Enter its passphrase if needed. The key and
-  passphrase are used for this connection only, never saved in the address book
-  or sent to the relay. A host-key prompt can reuse the key after you trust the
-  server; cancelling that prompt discards it.
+- **Private keys stay on your device.** Select or paste an OpenSSH Ed25519,
+  ECDSA, or RSA key, an unencrypted PKCS#8 PEM key, or a legacy RSA or EC PEM key.
+  OpenSSH and legacy PEM keys may use a passphrase; encrypted PKCS#8 PEM is
+  unsupported. The key and passphrase are used for this connection only, never
+  saved in the address book or sent to the relay. A host-key prompt can reuse
+  the key after you trust the server; cancelling that prompt discards it.
 - **Saved passwords are encrypted on your device.** The optional address book
   seals every saved host under a master password, using Argon2id and
   XChaCha20-Poly1305 inside the WebAssembly engine. A saved password is never

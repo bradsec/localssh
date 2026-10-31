@@ -29,7 +29,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     paragraphs: [
       "Enter the server hostname or IP address, SSH port, username, and password. Select Connect to server. Port 22 is the usual SSH port.",
       "You can connect without setting up saved hosts. A password you type is kept for this connection only.",
-      "For key-only servers, choose Private key. Select an OpenSSH or PEM Ed25519, ECDSA, or RSA private-key file, or paste its contents. Enter its passphrase if needed.",
+      "For key-only servers, choose Private key. Select an OpenSSH Ed25519, ECDSA, or RSA key, an unencrypted PKCS#8 PEM key, or a legacy RSA or EC PEM key. You can also paste the key. OpenSSH and legacy PEM keys may use a passphrase; encrypted PKCS#8 PEM is unsupported.",
     ],
   },
   {

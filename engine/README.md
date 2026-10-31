@@ -45,6 +45,9 @@ handle.close();
 The fifth argument also accepts `{ fromVault: entryId }` or
 `{ privateKey: Uint8Array, passphrase: string }`. The engine copies key bytes,
 parses them before dialing the relay, and clears the temporary Go byte slices.
+Supported private keys are OpenSSH Ed25519, ECDSA, or RSA (with or without a
+passphrase), unencrypted PKCS#8 PEM, and legacy RSA or EC PEM (with or without a
+passphrase). Encrypted PKCS#8 PEM is unsupported.
 
 `onHostKey` receives the SHA-256 fingerprint in OpenSSH's `SHA256:...` form
 and must answer synchronously, so callers load their trusted fingerprints

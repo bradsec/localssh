@@ -13,6 +13,7 @@ import (
 	"errors"
 	"math/big"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -67,6 +68,22 @@ func TestParsePrivateKeyIgnoresPassphraseForUnencryptedKey(t *testing.T) {
 	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
 	if _, err := ParsePrivateKey(marshalKey(t, edKey, ""), []byte("unused")); err != nil {
 		t.Fatalf("parse: %v", err)
+	}
+}
+
+func TestParsePrivateKeyRejectsEncryptedPKCS8(t *testing.T) {
+	// Test-only Ed25519 fixture generated with OpenSSL genpkey and passphrase "right".
+	key, err := os.ReadFile("testdata/encrypted_pkcs8_ed25519.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, passphrase := range []string{"right", "wrong", ""} {
+		t.Run(passphrase, func(t *testing.T) {
+			_, err := ParsePrivateKey(key, []byte(passphrase))
+			if err != ErrKeyUnsupported {
+				t.Fatalf("got %v, want direct ErrKeyUnsupported", err)
+			}
+		})
 	}
 }
 

@@ -85,4 +85,11 @@ describe("describeConnectionFailure", () => {
     expect(failure.kind).toBe(kind);
     expect(failure.topic).toBe("troubleshooting");
   });
+
+  it("offers conversion for unsupported private keys", () => {
+    const failure = describeConnectionFailure("private key format not supported");
+    expect(failure.recovery).toBe(
+      "This key format is not supported. Convert it with: ssh-keygen -p -f <keyfile>",
+    );
+  });
 });

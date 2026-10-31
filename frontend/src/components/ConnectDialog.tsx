@@ -237,7 +237,10 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
             <p>
               Select a private key from this device. localssh does not save the key or passphrase.
             </p>
-            <p>Supported formats: OpenSSH or PEM Ed25519, ECDSA, and RSA keys.</p>
+            <p>
+              Supported formats: OpenSSH Ed25519, ECDSA, or RSA (passphrase optional); unencrypted
+              PKCS#8 PEM; legacy RSA or EC PEM (passphrase optional).
+            </p>
             <label className="field connect-form__key">
               <span>Or paste the private key</span>
               <textarea

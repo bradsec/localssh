@@ -88,12 +88,13 @@ const VARIANTS: Record<ConnectionFailureKind, Variant> = {
   },
   "key-invalid": {
     message: "This private key could not be read. Select a supported key file and try again.",
-    recovery: "Use an OpenSSH or PEM Ed25519, ECDSA, or RSA private key.",
+    recovery:
+      "Use an OpenSSH Ed25519, ECDSA, or RSA key, an unencrypted PKCS#8 PEM key, or a legacy RSA or EC PEM key.",
     topic: "troubleshooting",
   },
   "key-unsupported": {
     message: "This key format is not supported. Select a supported private key format.",
-    recovery: "Supported formats: OpenSSH or PEM Ed25519, ECDSA, and RSA keys.",
+    recovery: "This key format is not supported. Convert it with: ssh-keygen -p -f <keyfile>",
     topic: "troubleshooting",
   },
   "key-passphrase": {
