@@ -31,6 +31,8 @@ others discover the project.
 - **SFTP files.** Browse remote directories, upload a selected file with progress
   and cancel, and download a remote file from each terminal tab. Replacing an
   existing file requires confirmation.
+- **In-app help.** Searchable help covers connection, host keys, files, touch
+  controls, privacy, and recovery without leaving the app.
 - **Phone and tablet controls.** The responsive interface includes a
   [touch key bar](#key-bar), sticky Ctrl and Alt modifiers, terminal gestures, a
   [clipboard menu](#clipboard), keyboard-aware viewport fitting, and 44px touch
@@ -44,9 +46,11 @@ others discover the project.
 
 ## Interface preview
 
-![localssh connection form with the encrypted saved-host vault locked](screenshot1.png)
+![Current connection form with password and private-key choices](screenshot1.png)
 
-![localssh connected terminal displaying a remote directory listing](screenshot2.png)
+![Connected terminal tab with its SFTP file panel](screenshot2.png)
+
+See the [user guide](docs/USER-GUIDE.md) for the current controls.
 
 ## Repository layout
 
@@ -58,13 +62,27 @@ others discover the project.
 
 ## Install with Docker
 
-The single-container option uses `docker run -p 9080:80 ghcr.io/bradsec/localssh:latest`.
-For Compose, use `docker compose -f compose.all-in-one.yaml up -d`.
-The existing two-container Compose setup remains below.
+Install Docker Engine or Docker Desktop. The combined image serves the
+page and `/relay` on one port. This command binds only to the Docker host's
+loopback address:
 
-Docker Compose pulls and starts the published frontend and relay images. Install
-Docker Engine with the Compose plugin, or Docker Desktop. No local Go or Node
-installation is required.
+```bash
+docker run -d --name localssh -p 127.0.0.1:9080:80 ghcr.io/bradsec/localssh:latest
+```
+
+Open <http://localhost:9080>. The combined image checks that relay requests
+come from the page's origin by default. Set `ALLOWED_HOSTS` and
+`ALLOWED_PORTS` when exposing it to other devices. This image command has not
+been run here because a Docker image could not be built in this environment.
+
+For the same image with Compose, from a repository checkout run:
+
+```bash
+docker compose -f compose.all-in-one.yaml up -d
+```
+
+The [two-image Compose file](compose.yaml) remains available. It pulls the
+frontend and relay images and proxies `/relay` through the frontend port:
 
 ```bash
 git clone https://github.com/bradsec/localssh.git
@@ -74,7 +92,10 @@ docker compose up -d
 
 Open <http://localhost:9080>.
 
-### Update to a new release
+The Compose commands above passed `docker compose config --quiet` here. The
+containers themselves have not been run here.
+
+### Update the two-image Compose installation
 
 Pull the new images and recreate the containers. Compose replaces only what
 changed, and a session is only interrupted for as long as the containers take to
@@ -87,8 +108,8 @@ docker compose pull
 docker compose up -d
 ```
 
-`git pull` matters when `compose.yaml`, the relay proxy configuration, or the
-`.env.example` defaults changed in the release; your own `.env` is never touched.
+Review changes to `compose.yaml`, the proxy configuration, and `.env.example`
+before updating your own `.env`.
 
 This tracks the `latest` tag. To move deliberately between releases, set the
 version in `.env` and recreate. Published versions are listed on the
@@ -100,6 +121,11 @@ LOCALSSH_VERSION=YYYY.MM.DD
 
 Old images stay on disk after an update. Remove the ones no longer referenced
 with `docker image prune`.
+
+For `compose.all-in-one.yaml`, pull and recreate with the same `-f` option.
+For `docker run`, pull the image, then recreate the named container with the
+same port, policy, and TLS settings. Recreating a container disconnects its
+active SSH sessions. Those image operations were not executed here.
 
 ### Stop or remove the Docker installation
 
@@ -115,18 +141,25 @@ To also remove the downloaded frontend and relay images:
 docker compose down --rmi all --remove-orphans
 ```
 
-These commands do not remove the source checkout or `.env` configuration.
+These two commands apply to `compose.yaml`. They do not remove the source
+checkout or `.env` configuration. Use `docker compose -f
+compose.all-in-one.yaml down` for the combined Compose option, or
+`docker rm -f localssh` for the named `docker run` container. Removal commands
+were not executed here.
 
-The web interface binds to `127.0.0.1` by default. The frontend proxies relay
-traffic internally through the same web port, so the relay does not need a
-separate published port.
+Both Compose examples bind to `127.0.0.1` by default. The frontend proxies relay
+traffic internally through the same web port in the two-image setup.
 
 ### Access from a local network
 
-This is the intended deployment: install localssh on one server, and everyone
-else on the network uses it as their SSH client from a browser. Each visitor's
-own browser runs the SSH engine and stores its own known hosts, so nothing about
-one person's session is shared with another.
+Install localssh on one server, and other devices can use it through a browser.
+Each visitor's browser runs its own SSH engine and stores its own known hosts.
+Use trusted HTTPS for LAN access: plain LAN HTTP can be changed by an on-path
+actor before the browser runs the SSH engine. It is also not a secure context,
+so browsers restrict the Clipboard API. `http://localhost` is treated
+differently by browsers. See [Secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Secure_Contexts)
+and [Clipboard API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API)
+(accessed 2026-11-01, current browser platform guidance).
 
 Give the server a stable LAN address or hostname, then copy and edit the
 configuration:
@@ -144,6 +177,11 @@ ALLOWED_ORIGINS=*
 ALLOWED_HOSTS=server.example.com,*.internal.example
 ALLOWED_PORTS=22
 ```
+
+Hostname allowlist entries trust DNS for those names. An attacker controlling
+that DNS can point an allowed name at any internal address. Prefer target IPs
+or names under DNS you control, and restrict the host's outbound traffic to the
+intended SSH targets.
 
 Start the application and open <http://192.168.1.20:9080> from another
 computer:
@@ -175,12 +213,24 @@ plain HTTP does not protect the page from modification in transit. Use a
 restrictive target allowlist and put an internet-facing deployment behind an
 authenticated HTTPS reverse proxy.
 
+### HTTPS for the combined image
+
+The combined server uses HTTPS and WSS on the same port when both
+`TLS_CERT_FILE` and `TLS_KEY_FILE` point to readable files inside the container.
+Mount a certificate and private key, then set both variables. Use a certificate
+trusted by every client device. [mkcert](https://github.com/FiloSottile/mkcert)
+can issue certificates from a local CA for private use; install that CA on each
+client and never distribute its private key (project README, accessed
+2026-11-01). A trusted reverse proxy such as Caddy is another option. Keep
+the proxy and the service on a protected network, and allow WebSocket upgrades
+on `/relay`. The certificate and proxy paths are environment-dependent and
+were not executed here.
+
 ### When a browser cannot connect
 
 A browser is not told why a WebSocket handshake failed: the relay's 403 and its
 reason are hidden from the page, which can only report that the relay could not
-be reached. The relay logs every refusal with the value it rejected, so check
-there first:
+be reached. The relay logs refused origins and targets, so check there first:
 
 ```bash
 docker compose logs relay
@@ -202,15 +252,23 @@ cp .env.example .env
 | -------- | ------- | ------- |
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface for the web port. Use `0.0.0.0` for LAN access. |
 | `FRONTEND_PORT` | `9080` | Host port for the web interface. |
-| `ALLOWED_ORIGINS` | local frontend URLs | Browser origins allowed to use the relay, matched exactly. `*` allows any origin, which is the practical setting for a firewalled LAN. |
-| `ALLOWED_HOSTS` | `*` | Comma-separated target hosts. `*.example.com` matches subdomains. |
+| `ALLOWED_ORIGINS` | local frontend URLs in two-image Compose; page origin in the combined image | Browser origins allowed to use the relay. Exact scheme, host, and port; `*` permits any origin. |
+| `ALLOWED_HOSTS` | `*` | Comma-separated target hosts. `*.example.com` matches subdomains, not the bare name. A hostname rule trusts DNS for that name. |
 | `ALLOWED_PORTS` | `22` | Comma-separated target TCP ports. |
 | `MAX_SESSIONS` | `256` | Maximum concurrent relay sessions. New sessions receive HTTP 503 at capacity. |
 | `TARGET_CONNECT_TIMEOUT_MS` | `10000` | Maximum time in milliseconds for the relay to establish a target TCP connection. |
+| `PORT` | `80` combined, `8787` standalone relay | Container listener port; change the Docker port mapping with it. |
+| `HOST` | `0.0.0.0` | Listener interface inside the container. |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | unset | Combined image only. Both paths must be set for HTTPS and WSS. |
+| `STATIC_ROOT` | `/app/frontend` | Combined image static-file directory; intended for local tests or development. |
 
-`LOCALSSH_VERSION` selects the container image tag. Leave it unset to track the
-latest release, or set it to a published `YYYY.MM.DD` or `YYYY.MM.DD.N` release
-for repeatable installs.
+`LOCALSSH_VERSION` selects the image tag in [two-image Compose](compose.yaml).
+The [combined Compose example](compose.all-in-one.yaml) and `docker run` command
+use `latest` as written; edit their image reference to pin a published
+`YYYY.MM.DD` or `YYYY.MM.DD.N` tag. Compose reads `.env` for interpolation;
+the example does not pass every variable to the combined container. See
+[Docker's Compose interpolation reference](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation)
+(accessed 2026-11-01, current Compose CLI).
 
 Unless it is `*`, `ALLOWED_ORIGINS` must contain every exact URL used to open the
 interface, including its scheme, hostname or address, and non-default port. For a
@@ -246,7 +304,7 @@ append a revision number as `YYYY.MM.DD.N`.
 
 `VERSION` holds the release, and nothing else in the repository repeats it:
 releasing is a one-line edit to that file. The frontend build reads it, the
-release workflow validates it and passes it to both image builds as the
+release workflow validates it and passes it to all three image builds as the
 `VERSION` build argument, which becomes the image tag and the OCI metadata. The
 npm packages are private and never published, so they carry a fixed `0.0.0`
 rather than a copy of the release, and a container built by hand with no build
@@ -255,14 +313,21 @@ argument labels itself `development`.
 The connect panel and the About panel both show the running version, so anyone
 can read it without inspecting the containers.
 
-Changing `VERSION` on `main` runs the release workflow. The workflow validates
-the calendar date, runs the engine, relay, and frontend checks, publishes
-multi-platform frontend and relay images to GitHub Container Registry, and
+Changing `VERSION` on `main` runs the Release workflow. It validates
+the calendar date, runs the engine, relay, frontend, and browser checks, publishes
+multi-platform frontend, relay, and combined images to GitHub Container Registry, and
 creates a matching `vYYYY.MM.DD` or `vYYYY.MM.DD.N` GitHub release. Each
-calendar version can be released only once. Both versioned images must finish
-building and attestation before either `latest` tag is promoted. Registry tag
-updates are separate operations, so promotion is not atomic across images;
-pin `LOCALSSH_VERSION` when deploying an exact release pair.
+calendar version can be released only once. All versioned images must finish
+building and attestation before any `latest` tag is promoted. Registry tag
+updates are separate operations, so promotion is not atomic across images.
+Pin `LOCALSSH_VERSION` for the two-image Compose pair, or pin the combined
+image tag in its command or Compose file.
+
+The [Quality workflow](.github/workflows/quality.yml) runs on pull requests
+and pushes to `main`. It checks Go, relay, frontend, Chromium browser tests,
+and a combined-image Docker smoke test. The [Release workflow](.github/workflows/release.yml)
+runs on a `VERSION` change pushed to `main` or by manual dispatch. Live GitHub
+workflow execution has not been verified here.
 
 ## Security model
 
@@ -367,7 +432,8 @@ Select **New terminal** to connect to another server. Select a tab to switch
 shells, or its close button to disconnect only that shell. On a hardware
 keyboard, Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch tabs. Closing the
 page disconnects all sessions. If the relay reaches `MAX_SESSIONS`, close a
-terminal and try again; the relay log identifies the limit. SSH keepalives
+terminal and try again; the browser cannot distinguish this from other failed
+WebSocket handshakes. SSH keepalives
 detect silent network loss and show a connection error after missed replies.
 If a new connection needs a host-key check, **Return to open terminal** keeps
 the other shells available; select the connecting tab to resume the check.
@@ -379,8 +445,9 @@ a file, folder, link, broken link, or special file. Choose **Upload file** to
 send one file. If the name already exists on the server, localssh asks before
 replacing it; the replacement keeps the old file's permissions but not its
 owner or access lists, and a link at that name is replaced, not followed.
-Uploads stage to a hidden `.localssh-upload-*` file, so a cancelled or failed
-transfer leaves the previous file intact. Closing Files or disconnecting waits
+Uploads stage to a hidden `.localssh-upload-*` file. A failed replacement on a
+server without `posix-rename@openssh.com` can remove the old file; the error
+names the staged copy to recover. Closing Files or disconnecting waits
 up to 10 seconds for that file to be removed; a stage file left behind by a
 lost connection is removed the next time its folder is listed after 24 hours.
 Select **Download file** beside a file to save it through the browser.
@@ -482,21 +549,39 @@ happens on the way to the Clipboard menu. Typing into the session clears it.
 
 ## Development
 
-Development from source requires Go 1.27.3 or newer and Node.js 26 or newer.
+Development from source uses Go 1.27.3 and Node.js 26. The npm manifests
+require Node 26. Run `source ~/.nvm/nvm.sh && nvm use 26` if using nvm, then
+install dependencies with `npm ci` in both `relay/` and `frontend/`. Build the
+engine before starting the frontend. These commands run from the repository root:
 
 ```bash
-# Engine
-cd engine && go test ./... && GOOS=js GOARCH=wasm go vet ./...
-
-# Relay
-cd relay && npm test
-
-# Frontend
-cd frontend && npm test && npm run lint && npx tsc -b && npm run build
-
-# Browser end-to-end test (builds the engine, starts a test sshd and relay)
-cd frontend && npm run test:e2e
+source ~/.nvm/nvm.sh && nvm use 26
+cd engine
+go test ./...
+GOOS=js GOARCH=wasm go vet ./...
+./build.sh
+cd ../relay
+npm ci
+npm test
+npm run lint
+npm run format:check
+npm run build
+cd ../frontend
+npm ci
+npm test
+npm run lint
+npm run format:check
+npx tsc -b
+npm run build
+npm run test:e2e
 ```
+
+The browser suite builds the engine and starts a local test SSH server and
+relay. For interactive development, run `npm run relay:local` in `relay/`
+and `VITE_RELAY_WS_URL=ws://127.0.0.1:8787 npm run dev` in `frontend/`
+after `./build.sh`. See the component READMEs
+for their interfaces. The full command sequence was not rerun solely for this
+documentation edit; individual checks are recorded in the audit report.
 
 ## Credits and acknowledgements
 

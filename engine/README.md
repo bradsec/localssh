@@ -8,6 +8,7 @@ user's device rather than on a server.
 | ----------- | --------------------------------------------------------------------- |
 | `main`      | Exposes `sshConnect` on `window` and bridges terminal and SFTP callbacks to JavaScript. |
 | `sshclient` | Handshake, password or key auth, host-key verification, PTY, and a test server with SFTP. |
+| `remotefiles` | SFTP listing, staged upload, and bounded download. |
 | `wsconn`    | A `net.Conn` over a browser WebSocket, so `sshclient` dials as if TCP.  |
 
 `sshclient` takes an already-established `net.Conn`, so the same code runs
@@ -34,11 +35,16 @@ echoes bytes rather than running a shell. Run it as
 const handle = await sshConnect(relayWsUrl, host, port, username, password, {
   onHostKey: (fingerprint) => boolean,  // must return synchronously
   onData: (chunk) => void,              // Uint8Array
-  onClose: () => void,
+  onClose: (reason) => void,            // empty after a clean exit
 });
 
-handle.write(new Uint8Array([...]));
+handle.write(new Uint8Array([65]));
 handle.resize(cols, rows);
+const files = await handle.openFiles();
+const listing = await files.list(".");
+// listing: { path, entries: [{ name, kind, isLink, size }], truncated }
+files.cancel();
+files.close();
 handle.close();
 ```
 
@@ -55,6 +61,13 @@ before connecting. Returning false aborts the connection.
 
 Connecting is bounded by a 30 second deadline covering the relay dial, the
 handshake, and authentication.
+
+`openFiles()` opens SFTP on the existing verified SSH session. The file handle
+also exposes `upload(path, file, overwrite, onProgress)` and
+`download(path, onChunk, onProgress)`. Uploads stage in a hidden remote file;
+`close()` on the file handle leaves the terminal open. Closing the SSH handle
+closes both. The frontend [user guide](../docs/USER-GUIDE.md) describes the
+visible file behavior.
 
 ## Test
 

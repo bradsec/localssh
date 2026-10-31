@@ -126,10 +126,11 @@ func kindOf(mode os.FileMode) Kind {
 }
 
 // Upload writes size bytes from src to name through a temporary file in the
-// same directory, then renames it into place, so a failed or cancelled upload
-// leaves any existing file unchanged. Without overwrite it returns ErrExists
-// when name exists. With overwrite it keeps the replaced file's permission
-// bits; a symbolic link at name is replaced by the file, not followed.
+// same directory, then renames it into place. On servers without posix-rename,
+// a failed replacement rename can leave the old file removed and the staged
+// upload as the only copy. Without overwrite it returns ErrExists when name
+// exists. With overwrite it keeps the replaced file's permission bits; a
+// symbolic link at name is replaced by the file, not followed.
 // progress receives the bytes read from src so far.
 func Upload(ctx context.Context, c *sftp.Client, name string, src io.Reader, size int64, overwrite bool, progress func(int64)) error {
 	if name == "" || path.Base(name) == "." || path.Base(name) == "/" {

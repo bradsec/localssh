@@ -26,8 +26,8 @@ func main() {
 
 // sshConnect(relayWsUrl, host, port, username, auth, callbacks) -> Promise<handle>
 // auth: a password string, { fromVault: "<entryId>" }, or { privateKey: Uint8Array, passphrase: string }
-// callbacks: { onHostKey(fingerprint) -> bool, onData(Uint8Array), onClose() }
-// handle: { write(Uint8Array), resize(cols, rows), close() }
+// callbacks: { onHostKey(fingerprint) -> bool, onData(Uint8Array), onClose(reason) }
+// handle: { write(Uint8Array), resize(cols, rows), close(), openFiles() }
 func sshConnect(this js.Value, args []js.Value) any {
 	handler := js.FuncOf(func(this js.Value, resolveReject []js.Value) any {
 		resolve, reject := resolveReject[0], resolveReject[1]

@@ -5,9 +5,10 @@ cannot open TCP sockets. It pumps bytes and nothing more: the SSH session is
 negotiated end to end between the browser and the target, so the relay only
 ever sees ciphertext.
 
-The relay runs on Node and `ws`. The Docker entry point applies the access
-policy in `src/access.ts`; the loopback development command omits that policy
-so local development needs no configuration.
+The relay runs on Node 26 and `ws`. The standalone Docker entry point applies
+the access policy in `src/access.ts`; the loopback development command omits
+that policy so local development needs no configuration. The combined image
+serves the page and `/relay` on one port and checks the page origin by default.
 
 ## Protocol
 
@@ -29,10 +30,19 @@ any host and port through it.
 | Variable          | Required | Meaning                                                           |
 | ----------------- | -------- | ----------------------------------------------------------------- |
 | `ALLOWED_ORIGINS` | yes      | Comma-separated origins allowed to open a session. `*` allows any. |
-| `ALLOWED_HOSTS`   | yes      | Comma-separated hostnames the relay may dial. `*.example.com` matches subdomains, but not the bare domain. |
+| `ALLOWED_HOSTS`   | yes      | Comma-separated target names or IPs. `*.example.com` matches subdomains, but not the bare domain. Hostname rules trust DNS for those names. |
 | `ALLOWED_PORTS`   | no       | Comma-separated ports. Defaults to `22`.                           |
 | `MAX_SESSIONS` | no | Maximum concurrent sessions. Defaults to `256`. |
 | `TARGET_CONNECT_TIMEOUT_MS` | no | Target TCP connection deadline in milliseconds. Defaults to `10000`. |
+
+These requirements apply to the standalone relay. The combined image defaults
+`ALLOWED_HOSTS` to `*` and checks same-origin requests unless
+`ALLOWED_ORIGINS` is set. Restrict `ALLOWED_HOSTS` before exposing the service
+to other devices. Prefer IPs or names under owner-controlled DNS, plus outbound
+rules limiting the host to intended SSH targets. The combined image also accepts
+`TLS_CERT_FILE` and `TLS_KEY_FILE` together for HTTPS and WSS, `PORT` (default
+`80`), `HOST` (default `0.0.0.0`), and `STATIC_ROOT` (default `/app/frontend`,
+for development or tests). See [deployment](../README.md#install-with-docker).
 
 A rejected upgrade returns `403`. A target rejected after the connect frame
 closes the socket with code `1008` and the reason `target not allowed`; the
@@ -49,6 +59,9 @@ until the target drains. In the reverse direction, it pauses the target once
 more than 1 MiB is buffered for the browser and resumes below 256 KiB.
 
 ## Development
+
+Use Node 26 from [`.nvmrc`](../.nvmrc). From this directory:
+With nvm, run `source ~/.nvm/nvm.sh && nvm use 26` before npm commands.
 
 ```bash
 npm ci

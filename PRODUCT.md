@@ -22,9 +22,12 @@ K1 private-key authentication supports OpenSSH Ed25519, ECDSA, and RSA keys (wit
 
 ## Material inventory
 
-Real: README product and deployment behavior; existing frontend interface and error paths; design review help-entry finding D-05; approved K1, F1, and T1 spec stubs.
+Real: README product and deployment behavior; frontend interface, in-app help,
+and error paths; implemented K1 key auth, T1 tabs, and F1 SFTP; design review
+help-entry finding D-05.
 
-Sample: none. Absent: customer quotes, logos, adoption numbers, security audit, representative user research, supported key-format list, measured device memory limit, and launch terms.
+Sample: none. Absent: customer quotes, logos, adoption numbers, security audit,
+representative user research, measured device memory limit, and launch terms.
 
 ## Language and legal
 

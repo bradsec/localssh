@@ -1,8 +1,8 @@
 # localssh frontend
 
 React and Vite frontend for localssh. It provides the SSH connection form,
-trust-on-first-use host-key verification, an xterm.js terminal, and persistent
-terminal appearance settings.
+trust-on-first-use host-key verification, multiple terminal tabs, per-tab SFTP
+file panels, in-app help, and persistent terminal appearance settings.
 
 See the [root README](../README.md) for the architecture, security model, and
 credits.
@@ -36,6 +36,9 @@ size from the Appearance menu.
 
 ## Development
 
+Use Node 26 from [`.nvmrc`](../.nvmrc).
+With nvm, run `source ~/.nvm/nvm.sh && nvm use 26` before npm commands.
+
 Build the WASM engine before starting or building the frontend:
 
 ```bash
@@ -44,17 +47,19 @@ cd ../engine
 
 cd ../frontend
 npm ci
-npm run dev
+VITE_RELAY_WS_URL=ws://127.0.0.1:8787 npm run dev
 ```
 
-The frontend connects to `ws://127.0.0.1:8787` by default. Override the relay
-URL with `VITE_RELAY_WS_URL`.
+The frontend otherwise uses the page's `/relay` path. Set `VITE_RELAY_WS_URL`
+for the separate local relay.
 
 ## Verification
 
 ```bash
 npm test
 npm run lint
+npm run format:check
 npx tsc -b --pretty false
 npm run build
+npm run test:e2e
 ```
