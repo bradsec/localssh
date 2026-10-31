@@ -5,14 +5,28 @@ export interface SshHandle {
   openFiles?(): Promise<SftpHandle>;
 }
 
+/** What a listing entry is, after following a symbolic link. "broken" is a link whose target cannot be read. */
+export type RemoteFileKind = "file" | "folder" | "other" | "broken";
+
 export interface RemoteFile {
   name: string;
-  isDir: boolean;
+  kind: RemoteFileKind;
+  isLink: boolean;
+  /** Size of the file, or of a link's target. */
   size: number;
 }
 
+export interface RemoteListing {
+  /** The server's absolute form of the requested path. */
+  path: string;
+  entries: RemoteFile[];
+}
+
+/** The text the engine rejects with when an upload without overwrite finds its target. */
+export const REMOTE_FILE_EXISTS = "remote file exists";
+
 export interface SftpHandle {
-  list(path: string): Promise<RemoteFile[]>;
+  list(path: string): Promise<RemoteListing>;
   upload(
     path: string,
     file: File,
@@ -26,6 +40,47 @@ export interface SftpHandle {
   ): Promise<void>;
   cancel(): void;
   close(): void;
+}
+
+export class FilesClosedError extends Error {
+  constructor() {
+    super("The file connection is closed. Open Files again.");
+    this.name = "FilesClosedError";
+  }
+}
+
+function settled<T>(result: Promise<T> | undefined): Promise<T> {
+  // The engine releases its functions when Files or the session closes. A
+  // call through a released function returns undefined instead of a Promise,
+  // which would otherwise read as success.
+  if (typeof (result as { then?: unknown } | undefined)?.then !== "function") {
+    return Promise.reject(new FilesClosedError());
+  }
+  return result as Promise<T>;
+}
+
+/** Wraps an engine file handle so calls made after it closed reject. */
+export function guardSftp(raw: SftpHandle): SftpHandle {
+  return {
+    list: async (path) => {
+      const listing = await settled(raw.list(path));
+      if (!listing || typeof listing.path !== "string" || !Array.isArray(listing.entries)) {
+        throw new FilesClosedError();
+      }
+      return listing;
+    },
+    upload: (path, file, overwrite, onProgress) =>
+      settled(raw.upload(path, file, overwrite, onProgress)),
+    download: (path, onChunk, onProgress) => settled(raw.download(path, onChunk, onProgress)),
+    cancel: () => raw.cancel(),
+    close: () => raw.close(),
+  };
+}
+
+/** Opens the engine's file handle for a session, rejecting if the session has closed. */
+export async function openFiles(handle: SshHandle): Promise<SftpHandle> {
+  if (!handle.openFiles) throw new Error("SFTP is unavailable in this SSH engine");
+  return guardSftp(await settled(handle.openFiles()));
 }
 
 declare global {

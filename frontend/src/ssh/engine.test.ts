@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { connectSession, instantiateEngine } from "./engine.js";
+import {
+  connectSession,
+  FilesClosedError,
+  guardSftp,
+  instantiateEngine,
+  openFiles,
+} from "./engine.js";
+import type { SftpHandle } from "./engine.js";
 import * as engineModule from "./engine.js";
 
 const sshConnect = vi.fn();
@@ -127,5 +134,58 @@ describe("instantiateEngine", () => {
 
     await expect(instantiateEngine(response, {})).rejects.toThrow("invalid module");
     expect(buffered).not.toHaveBeenCalled();
+  });
+});
+
+describe("guardSftp", () => {
+  // A call through a released engine function returns undefined.
+  const released = (): SftpHandle =>
+    ({
+      list: vi.fn().mockReturnValue(undefined),
+      upload: vi.fn().mockReturnValue(undefined),
+      download: vi.fn().mockReturnValue(undefined),
+      cancel: vi.fn(),
+      close: vi.fn(),
+    }) as unknown as SftpHandle;
+
+  it("rejects calls made after the engine released the handle", async () => {
+    const files = guardSftp(released());
+    await expect(files.list(".")).rejects.toBeInstanceOf(FilesClosedError);
+    await expect(files.upload("a", new File([], "a"), false, () => {})).rejects.toBeInstanceOf(
+      FilesClosedError,
+    );
+    await expect(
+      files.download(
+        "a",
+        async () => {},
+        () => {},
+      ),
+    ).rejects.toBeInstanceOf(FilesClosedError);
+  });
+
+  it("passes results and engine errors through", async () => {
+    const listing = { path: "/srv", entries: [] };
+    const files = guardSftp({
+      ...released(),
+      list: vi.fn().mockResolvedValue(listing),
+      upload: vi.fn().mockRejectedValue("remote file exists"),
+    });
+    await expect(files.list("/srv")).resolves.toBe(listing);
+    await expect(files.upload("a", new File([], "a"), false, () => {})).rejects.toBe(
+      "remote file exists",
+    );
+  });
+
+  it("rejects opening files on a released session handle", async () => {
+    const handle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      openFiles: vi.fn(),
+    };
+    await expect(openFiles(handle)).rejects.toBeInstanceOf(FilesClosedError);
+    await expect(openFiles({ write: vi.fn(), resize: vi.fn(), close: vi.fn() })).rejects.toThrow(
+      "SFTP is unavailable",
+    );
   });
 });

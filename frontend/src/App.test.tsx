@@ -154,14 +154,20 @@ describe("App", () => {
 
   it("keeps each tab's file panel on its own SSH handle", async () => {
     const firstFiles: engine.SftpHandle = {
-      list: vi.fn().mockResolvedValue([{ name: "first.txt", isDir: false, size: 1 }]),
+      list: vi.fn().mockResolvedValue({
+        path: "/home/tester",
+        entries: [{ name: "first.txt", kind: "file", isLink: false, size: 1 }],
+      }),
       upload: vi.fn(),
       download: vi.fn(),
       cancel: vi.fn(),
       close: vi.fn(),
     };
     const secondFiles: engine.SftpHandle = {
-      list: vi.fn().mockResolvedValue([{ name: "second.txt", isDir: false, size: 2 }]),
+      list: vi.fn().mockResolvedValue({
+        path: "/home/tester",
+        entries: [{ name: "second.txt", kind: "file", isLink: false, size: 2 }],
+      }),
       upload: vi.fn(),
       download: vi.fn(),
       cancel: vi.fn(),

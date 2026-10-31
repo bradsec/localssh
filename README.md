@@ -368,16 +368,26 @@ detect silent network loss and show a connection error after missed replies.
 If a new connection needs a host-key check, **Return to open terminal** keeps
 the other shells available; select the connecting tab to resume the check.
 
-Select **Files** in a connected tab to browse that server. Enter a **Remote
-path**, select a directory, or choose **Upload file**. A matching remote name
-requires **Replace file** confirmation. Uploads stage to a temporary file, so
-a cancelled transfer leaves the previous file intact when cleanup succeeds.
-Select **Download file** beside a file to save it through the browser. Transfers
-run in 32 KiB chunks; the browser uses file storage when available, with a
-16 MiB memory fallback when it is not. On iPhone or iPad, use the browser's
-download, Share, or Save to Files action when prompted. If automatic saving is
-blocked, select **Save download** in the file panel. **Close files** leaves
-the terminal connected; disconnecting the tab stops its transfer.
+Select **Files** in a connected tab to browse that server. The panel shows the
+current folder; enter a **Remote path**, select a folder (including a link to a
+folder), or select **Up** for the parent folder. Each entry shows whether it is
+a file, folder, link, broken link, or special file. Choose **Upload file** to
+send one file. If the name already exists on the server, localssh asks before
+replacing it; the replacement keeps the old file's permissions but not its
+owner or access lists, and a link at that name is replaced, not followed.
+Uploads stage to a hidden `.localssh-upload-*` file, so a cancelled or failed
+transfer leaves the previous file intact. Closing Files or disconnecting waits
+up to 10 seconds for that file to be removed; a stage file left behind by a
+lost connection is removed the next time its folder is listed after 24 hours.
+Select **Download file** beside a file to save it through the browser.
+Transfers keep up to 16 requests of 32 KiB in flight; the browser uses file
+storage when available, with a 16 MiB memory fallback when it is not. On
+iPhone or iPad, use the browser's download, Share, or Save to Files action when
+prompted. If automatic saving is blocked, select **Save download** in the file
+panel; the browser copy stays for 10 minutes or until the next transfer, Close
+files, or leaving the page. **Close files** leaves the terminal connected and
+asks first if a transfer is running; disconnecting the tab stops its transfer.
+Control and text-direction characters in remote names display as `<U+XXXX>`.
 
 The toolbar's Help button opens a searchable guide to connection setup,
 host-key checks, saved hosts, terminal controls, files, keyboard shortcuts, copy and

@@ -182,6 +182,15 @@ export function describeSftpFailure(
       topic: "files",
     };
   }
+  if (/file connection is closed|SFTP closed|connection closed/i.test(raw)) {
+    return {
+      kind: "unknown",
+      message:
+        "Files is no longer connected. Close Files and select Files again, or reconnect the tab.",
+      recovery: "",
+      topic: "files",
+    };
+  }
   if (/transfer cancelled/i.test(raw)) {
     return {
       kind: "unknown",

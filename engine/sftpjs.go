@@ -3,101 +3,99 @@
 package main
 
 import (
-	"crypto/rand"
+	"context"
 	"errors"
-	"fmt"
 	"io"
-	"os"
-	"path"
 	"sync"
-	"sync/atomic"
 	"syscall/js"
+	"time"
 
 	"github.com/pkg/sftp"
+
+	"engine/remotefiles"
 )
 
-const transferChunkSize = 32 << 10
+// cleanupTimeout bounds how long closing the panel or the session waits for
+// a cancelled upload to remove its temporary file.
+const cleanupTimeout = 10 * time.Second
 
+var errFilesClosed = errors.New("SFTP closed")
+
+// sftpBridge adapts package remotefiles to the JavaScript file panel.
 type sftpBridge struct {
 	client *sftp.Client
 	mu     sync.Mutex
 	active *fileTransfer
 	closed bool
 	funcs  []js.Func
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 type fileTransfer struct {
-	cancelled atomic.Bool
-	mu        sync.Mutex
-	file      *sftp.File
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
-func (t *fileTransfer) setFile(file *sftp.File) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.cancelled.Load() {
-		_ = file.Close()
-		return errors.New("transfer cancelled")
-	}
-	t.file = file
-	return nil
-}
-
-func (t *fileTransfer) cancel() {
-	t.cancelled.Store(true)
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.file != nil {
-		_ = t.file.Close()
-	}
-}
-
-func (t *fileTransfer) check() error {
-	if t.cancelled.Load() {
-		return errors.New("transfer cancelled")
-	}
-	return nil
-}
-
-func (f *sftpBridge) start() (*fileTransfer, error) {
+func (f *sftpBridge) start() (context.Context, *fileTransfer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
-		return nil, errors.New("SFTP closed")
+		return nil, nil, errFilesClosed
 	}
 	if f.active != nil {
-		return nil, errors.New("transfer already in progress")
+		return nil, nil, errors.New("transfer already in progress")
 	}
-	t := new(fileTransfer)
+	ctx, cancel := context.WithCancel(context.Background())
+	t := &fileTransfer{cancel: cancel, done: make(chan struct{})}
 	f.active = t
-	return t, nil
+	return ctx, t, nil
 }
 
 func (f *sftpBridge) finish(t *fileTransfer) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	t.cancel()
+	close(t.done)
 	if f.active == t {
 		f.active = nil
 	}
 }
 
-func (f *sftpBridge) close() error {
+// busy reports whether a transfer is running. Closing then has to wait for
+// it, which needs the JavaScript event loop, so callers close off the
+// callback goroutine.
+func (f *sftpBridge) busy() bool {
 	f.mu.Lock()
-	if f.closed {
+	defer f.mu.Unlock()
+	return f.active != nil
+}
+
+// close cancels any transfer, waits up to cleanupTimeout for it to remove its
+// temporary file while the client is still open, then closes the client.
+// Every caller returns only after that has happened.
+func (f *sftpBridge) close() error {
+	f.closeOnce.Do(func() {
+		f.mu.Lock()
+		f.closed = true
+		active := f.active
 		f.mu.Unlock()
-		return nil
-	}
-	f.closed = true
-	active := f.active
-	f.mu.Unlock()
-	if active != nil {
-		active.cancel()
-	}
-	err := f.client.Close()
-	for _, fn := range f.funcs {
-		fn.Release()
-	}
-	return err
+		if active != nil {
+			active.cancel()
+			select {
+			case <-active.done:
+			case <-time.After(cleanupTimeout):
+			}
+		}
+		f.closeErr = f.client.Close()
+		// A call through a released func returns undefined instead of a
+		// Promise; the page treats that as closed (see guardSftp in engine.ts).
+		for _, fn := range f.funcs {
+			fn.Release()
+		}
+	})
+	return f.closeErr
 }
 
 func promise(work func() (any, error)) js.Value {
@@ -118,15 +116,19 @@ func promise(work func() (any, error)) js.Value {
 	return result
 }
 
-func awaitPromise(p js.Value) (js.Value, error) {
+// awaitPromise waits for value, which may be a Promise or a plain value.
+func awaitPromise(value js.Value) (js.Value, error) {
 	type result struct {
 		value js.Value
 		err   error
 	}
 	ready := make(chan result, 1)
 	ok := js.FuncOf(func(_ js.Value, args []js.Value) any { ready <- result{value: args[0]}; return nil })
-	bad := js.FuncOf(func(_ js.Value, args []js.Value) any { ready <- result{err: errors.New(args[0].String())}; return nil })
-	p.Call("then", ok, bad)
+	bad := js.FuncOf(func(_ js.Value, args []js.Value) any {
+		ready <- result{err: errors.New(js.Global().Get("String").Invoke(args[0]).String())}
+		return nil
+	})
+	js.Global().Get("Promise").Call("resolve", value).Call("then", ok, bad)
 	r := <-ready
 	ok.Release()
 	bad.Release()
@@ -135,7 +137,7 @@ func awaitPromise(p js.Value) (js.Value, error) {
 
 func (b *sessionBridge) openFiles() js.Value {
 	return promise(func() (any, error) {
-		client, err := sftp.NewClient(b.session.Client(), sftp.UseConcurrentReads(false), sftp.UseConcurrentWrites(false))
+		client, err := sftp.NewClient(b.session.Client(), remotefiles.ClientOptions()...)
 		if err != nil {
 			return nil, err
 		}
@@ -144,14 +146,15 @@ func (b *sessionBridge) openFiles() js.Value {
 		b.filesMu.Lock()
 		if b.closed {
 			b.filesMu.Unlock()
-			_ = client.Close()
+			_ = files.close()
 			return nil, errors.New("connection closed")
 		}
-		if b.files != nil {
-			_ = b.files.close()
-		}
+		previous := b.files
 		b.files = files
 		b.filesMu.Unlock()
+		if previous != nil {
+			_ = previous.close()
+		}
 		return value, nil
 	})
 }
@@ -163,15 +166,21 @@ func (f *sftpBridge) value() js.Value {
 		}
 		name := args[0].String()
 		return promise(func() (any, error) {
-			entries, err := f.client.ReadDir(name)
+			f.mu.Lock()
+			closed := f.closed
+			f.mu.Unlock()
+			if closed {
+				return nil, errFilesClosed
+			}
+			resolved, entries, err := remotefiles.List(f.client, name, time.Now())
 			if err != nil {
 				return nil, err
 			}
 			items := make([]any, 0, len(entries))
 			for _, entry := range entries {
-				items = append(items, map[string]any{"name": entry.Name(), "isDir": entry.IsDir(), "size": float64(entry.Size())})
+				items = append(items, map[string]any{"name": entry.Name, "kind": string(entry.Kind), "isLink": entry.IsLink, "size": float64(entry.Size)})
 			}
-			return items, nil
+			return map[string]any{"path": resolved, "entries": items}, nil
 		})
 	})
 	upload := js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -190,11 +199,10 @@ func (f *sftpBridge) value() js.Value {
 	})
 	cancel := js.FuncOf(func(_ js.Value, _ []js.Value) any {
 		f.mu.Lock()
-		active := f.active
-		f.mu.Unlock()
-		if active != nil {
-			go active.cancel()
+		if f.active != nil {
+			f.active.cancel()
 		}
+		f.mu.Unlock()
 		return nil
 	})
 	closeFiles := js.FuncOf(func(_ js.Value, _ []js.Value) any {
@@ -205,134 +213,98 @@ func (f *sftpBridge) value() js.Value {
 	return js.ValueOf(map[string]any{"list": list, "upload": upload, "download": download, "cancel": cancel, "close": closeFiles})
 }
 
-func (f *sftpBridge) upload(name string, local js.Value, overwrite bool, progress js.Value) error {
-	if name == "" || path.Base(name) == "." || path.Base(name) == "/" {
-		return errors.New("invalid remote file path")
+// percentReporter calls the page's progress callback only when the whole
+// percentage changes, so a large transfer does not make one call per packet.
+type percentReporter struct {
+	callback js.Value
+	last     int
+	err      error
+}
+
+func (p *percentReporter) report(done, total int64) {
+	percent := 100
+	if total > 0 {
+		percent = int(done * 100 / total)
 	}
-	t, err := f.start()
+	if percent == p.last || p.err != nil {
+		return
+	}
+	p.last = percent
+	_, p.err = callJS(p.callback, "call", js.Null(), percent)
+}
+
+func (f *sftpBridge) upload(name string, local js.Value, overwrite bool, progress js.Value) error {
+	ctx, t, err := f.start()
 	if err != nil {
 		return err
 	}
 	defer f.finish(t)
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return err
-	}
-	temp := path.Join(path.Dir(name), fmt.Sprintf(".localssh-upload-%x", random))
-	remote, err := f.client.OpenFile(temp, os.O_CREATE|os.O_WRONLY|os.O_EXCL)
+	size := int64(local.Get("size").Float())
+	reporter := &percentReporter{callback: progress, last: -1}
+	reporter.report(0, max(size, 1))
+	err = remotefiles.Upload(ctx, f.client, name, &jsFileReader{file: local, size: size}, size, overwrite, func(n int64) { reporter.report(n, size) })
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.client.Remove(temp) }()
-	if err := t.setFile(remote); err != nil {
-		return err
-	}
-	size := local.Get("size").Float()
-	for offset := 0.0; offset < size; {
-		if err := t.check(); err != nil {
-			return err
-		}
-		end := min(offset+transferChunkSize, size)
-		buffer, err := awaitPromise(local.Call("slice", offset, end).Call("arrayBuffer"))
-		if err != nil {
-			return err
-		}
-		data := make([]byte, buffer.Get("byteLength").Int())
-		js.CopyBytesToGo(data, js.Global().Get("Uint8Array").New(buffer))
-		if _, err := remote.Write(data); err != nil {
-			if t.check() != nil {
-				return t.check()
-			}
-			return err
-		}
-		offset = end
-		if _, err := callJS(progress, "call", js.Null(), int(offset*100/size)); err != nil {
-			return err
-		}
-	}
-	if err := t.check(); err != nil {
-		return err
-	}
-	if err := remote.Close(); err != nil {
-		return err
-	}
-	t.mu.Lock()
-	t.file = nil
-	t.mu.Unlock()
-	if err := t.check(); err != nil {
-		return err
-	}
-	if overwrite {
-		err = f.client.PosixRename(temp, name)
-	} else {
-		err = f.client.Rename(temp, name)
-	}
-	if err != nil {
-		return err
-	}
-	if size == 0 {
-		_, _ = callJS(progress, "call", js.Null(), 100)
-	}
-	return nil
+	reporter.report(size, size)
+	return reporter.err
 }
 
 func (f *sftpBridge) download(name string, chunk, progress js.Value) error {
-	t, err := f.start()
+	ctx, t, err := f.start()
 	if err != nil {
 		return err
 	}
 	defer f.finish(t)
-	info, err := f.client.Stat(name)
+	reporter := &percentReporter{callback: progress, last: -1}
+	if err := remotefiles.Download(ctx, f.client, name, jsChunkWriter{chunk: chunk}, reporter.report); err != nil {
+		return err
+	}
+	reporter.report(1, 1)
+	return reporter.err
+}
+
+// jsFileReader reads a browser File in slices, so the file is never held in
+// memory whole.
+type jsFileReader struct {
+	file   js.Value
+	size   int64
+	offset int64
+}
+
+func (r *jsFileReader) Read(p []byte) (int, error) {
+	if r.offset >= r.size {
+		return 0, io.EOF
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	end := min(r.offset+int64(len(p)), r.size)
+	buffer, err := awaitPromise(r.file.Call("slice", float64(r.offset), float64(end)).Call("arrayBuffer"))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if !info.Mode().IsRegular() {
-		return errors.New("not a regular file")
+	n := js.CopyBytesToGo(p, js.Global().Get("Uint8Array").New(buffer))
+	if n == 0 {
+		return 0, io.ErrUnexpectedEOF
 	}
-	remote, err := f.client.Open(name)
+	r.offset += int64(n)
+	return n, nil
+}
+
+// jsChunkWriter hands each chunk to the page and waits for its Promise, so
+// the page's storage applies backpressure to the download.
+type jsChunkWriter struct{ chunk js.Value }
+
+func (w jsChunkWriter) Write(p []byte) (int, error) {
+	data := js.Global().Get("Uint8Array").New(len(p))
+	js.CopyBytesToJS(data, p)
+	written, err := callJS(w.chunk, "call", js.Null(), data)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := t.setFile(remote); err != nil {
-		return err
+	if _, err := awaitPromise(written); err != nil {
+		return 0, err
 	}
-	defer remote.Close()
-	buffer := make([]byte, transferChunkSize)
-	var received int64
-	for {
-		if err := t.check(); err != nil {
-			return err
-		}
-		n, readErr := remote.Read(buffer)
-		if n > 0 {
-			data := js.Global().Get("Uint8Array").New(n)
-			js.CopyBytesToJS(data, buffer[:n])
-			written, err := callJS(chunk, "call", js.Null(), data)
-			if err != nil {
-				return err
-			}
-			if _, err := awaitPromise(written); err != nil {
-				return err
-			}
-			received += int64(n)
-			if info.Size() > 0 {
-				if _, err := callJS(progress, "call", js.Null(), int(received*100/info.Size())); err != nil {
-					return err
-				}
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			if t.check() != nil {
-				return t.check()
-			}
-			return readErr
-		}
-	}
-	if _, err := callJS(progress, "call", js.Null(), 100); err != nil {
-		return err
-	}
-	return t.check()
+	return len(p), nil
 }

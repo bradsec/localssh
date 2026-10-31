@@ -131,10 +131,10 @@ func Upload(ctx context.Context, c *sftp.Client, name string, src io.Reader, siz
 	switch {
 	case err != nil && !errors.Is(err, os.ErrNotExist):
 		return err
-	case exists && !overwrite:
-		return ErrExists
 	case exists && target.IsDir():
 		return fmt.Errorf("%s is a folder", name)
+	case exists && !overwrite:
+		return ErrExists
 	}
 
 	var random [16]byte

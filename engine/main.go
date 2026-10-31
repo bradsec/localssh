@@ -297,31 +297,50 @@ func (b *sessionBridge) lostReason() string {
 
 // close ends the session and calls onClose with the text reason returns, or
 // with "" when reason is nil. reason runs after the session is closed.
+//
+// A running file transfer is cancelled first, and the session stays open
+// until it has removed its temporary file (bounded by cleanupTimeout). That
+// wait needs the JavaScript event loop, so it runs off the caller's goroutine,
+// close returns nil, and onClose follows once the session is closed.
 func (b *sessionBridge) close(reason func() string) error {
 	b.closeOnce.Do(func() {
-		b.cancel()
-		b.writes.Close()
 		b.filesMu.Lock()
 		b.closed = true
 		files := b.files
 		b.filesMu.Unlock()
+		if files != nil && files.busy() {
+			go func() {
+				_ = files.close()
+				// No caller is left to receive the session's close error;
+				// onClose still reports the end of the session.
+				_ = b.finishClose(reason)
+			}()
+			return
+		}
 		if files != nil {
 			go func() { _ = files.close() }()
 		}
-		b.closeErr = b.session.Close()
-		message := ""
-		if reason != nil {
-			message = reason()
-		}
-		if _, err := callJS(b.callbacks, "onClose", message); err != nil {
-			b.closeErr = errors.Join(b.closeErr, err)
-		}
-		for _, fn := range b.funcs {
-			fn.Release()
-		}
-		b.funcs = nil
+		b.closeErr = b.finishClose(reason)
 	})
 	return b.closeErr
+}
+
+func (b *sessionBridge) finishClose(reason func() string) error {
+	b.cancel()
+	b.writes.Close()
+	err := b.session.Close()
+	message := ""
+	if reason != nil {
+		message = reason()
+	}
+	if _, callbackErr := callJS(b.callbacks, "onClose", message); callbackErr != nil {
+		err = errors.Join(err, callbackErr)
+	}
+	for _, fn := range b.funcs {
+		fn.Release()
+	}
+	b.funcs = nil
+	return err
 }
 
 func isFiniteInteger(value float64) bool {

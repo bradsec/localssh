@@ -1,3 +1,5 @@
+import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 for (const viewport of [
@@ -97,6 +99,8 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByLabel("Remote path").fill(".");
   await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.getByText("Current folder: /", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Up to parent folder" })).toBeDisabled();
   await page.getByLabel("Upload file").setInputFiles({
     name: "sample.txt",
     mimeType: "text/plain",
@@ -134,6 +138,27 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
   const replacementChunks: Buffer[] = [];
   for await (const chunk of replacementStream) replacementChunks.push(Buffer.from(chunk));
   expect(Buffer.concat(replacementChunks).toString()).toBe("replacement");
+
+  const root = process.env.E2E_SFTP_ROOT!;
+  mkdirSync(path.join(root, "logs"));
+  writeFileSync(path.join(root, "logs", "app.log"), "log line");
+  symlinkSync("logs", path.join(root, "logs-link"));
+  symlinkSync("missing", path.join(root, "broken-link"));
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  const files = page.getByRole("region", { name: "Files" });
+  await expect(files.getByRole("listitem").filter({ hasText: "logs-link" })).toContainText(
+    "Link to folder",
+  );
+  await expect(files.getByRole("listitem").filter({ hasText: "broken-link" })).toContainText(
+    "Broken link",
+  );
+  await page.getByRole("button", { name: "logs-link/" }).click();
+  await expect(page.getByText("Current folder: /logs-link", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download file app.log" })).toBeVisible();
+  await page.getByRole("button", { name: "Up to parent folder" }).click();
+  await expect(page.getByText("Current folder: /", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download file sample.txt" })).toBeVisible();
+  expect(readdirSync(root).filter((name) => name.startsWith(".localssh-upload-"))).toEqual([]);
   await page.getByRole("button", { name: "Close files" }).click();
   await page.locator(".xterm-screen").click();
   await page.keyboard.type("terminal-still-open");

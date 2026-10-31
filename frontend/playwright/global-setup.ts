@@ -114,6 +114,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const sftpRoot = path.join(keyDir, "sftp");
   mkdirSync(sftpRoot);
   const previousKeyPath = process.env.E2E_KEY_PATH;
+  const previousSftpRoot = process.env.E2E_SFTP_ROOT;
   const previousRejectedKeyPath = process.env.E2E_REJECTED_KEY_PATH;
 
   let sshd: ChildProcessWithoutNullStreams | undefined;
@@ -134,6 +135,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       else process.env.E2E_KEY_PATH = previousKeyPath;
       if (previousRejectedKeyPath === undefined) delete process.env.E2E_REJECTED_KEY_PATH;
       else process.env.E2E_REJECTED_KEY_PATH = previousRejectedKeyPath;
+      if (previousSftpRoot === undefined) delete process.env.E2E_SFTP_ROOT;
+      else process.env.E2E_SFTP_ROOT = previousSftpRoot;
     }
   };
 
@@ -149,6 +152,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     process.env.E2E_KEY_PATH = acceptedKey;
     process.env.E2E_REJECTED_KEY_PATH = rejectedKey;
 
+    // Tests add folders and links under the served root to check listing.
+    process.env.E2E_SFTP_ROOT = sftpRoot;
     sshd = spawn(path.join(engineDir, "dist/testsshd"), ["tester", "s3cret", authorizedKeys], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, E2E_SFTP_ROOT: sftpRoot },
