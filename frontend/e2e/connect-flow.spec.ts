@@ -72,6 +72,75 @@ test("connects through the relay, trusts the host key, and echoes input", async 
   await expect(page.locator(".xterm-rows")).toContainText("hello", { timeout: 5_000 });
 });
 
+test("uploads and downloads a file through the relay", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+  await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Password$/i).fill("s3cret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("region", { name: "Files" })).toBeInViewport();
+  await expect(
+    page.getByText("No files in this directory. Choose another path or upload a file."),
+  ).toBeVisible();
+  await page.getByLabel("Remote path").fill("/missing");
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(
+    page.getByText("Cannot open /missing: no such file. Check the remote path."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Learn more about files" }).click();
+  await expect(page.getByRole("heading", { name: "Browse and transfer files" })).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByLabel("Remote path").fill(".");
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await page.getByLabel("Upload file").setInputFiles({
+    name: "sample.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("SFTP round trip"),
+  });
+  await expect(page.getByText("Uploaded sample.txt.")).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download file sample.txt" }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe("sample.txt");
+  await expect(page.getByRole("link", { name: "Save download" })).toBeVisible();
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(chunks).toString()).toBe("SFTP round trip");
+  await page.getByLabel("Upload file").setInputFiles({
+    name: "sample.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("replacement"),
+  });
+  await expect(page.getByRole("alertdialog", { name: "Replace file" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Replace file" })).not.toBeVisible();
+  await page.getByLabel("Upload file").setInputFiles({
+    name: "sample.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("replacement"),
+  });
+  await page.getByRole("button", { name: "Replace file" }).click();
+  await expect(page.getByText("Uploaded sample.txt.")).toBeVisible();
+  const replacementDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download file sample.txt" }).click();
+  const replaced = await replacementDownload;
+  const replacementStream = await replaced.createReadStream();
+  const replacementChunks: Buffer[] = [];
+  for await (const chunk of replacementStream) replacementChunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(replacementChunks).toString()).toBe("replacement");
+  await page.getByRole("button", { name: "Close files" }).click();
+  await page.locator(".xterm-screen").click();
+  await page.keyboard.type("terminal-still-open");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".xterm-rows")).toContainText("terminal-still-open");
+});
+
 test("keeps two live terminal sessions and closes only the selected one", async ({ page }) => {
   const address = process.env.E2E_SSHD_ADDR!;
   const host = address.slice(0, address.lastIndexOf(":"));

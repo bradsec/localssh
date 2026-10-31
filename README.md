@@ -28,6 +28,9 @@ others discover the project.
   scrollback, automatic PTY resizing, and full-screen sessions.
 - **Multiple live terminals.** Open another server without closing current
   shells. Each tab has its own SSH session, output, and terminal size.
+- **SFTP files.** Browse remote directories, upload a selected file with progress
+  and cancel, and download a remote file from each terminal tab. Replacing an
+  existing file requires confirmation.
 - **Phone and tablet controls.** The responsive interface includes a
   [touch key bar](#key-bar), sticky Ctrl and Alt modifiers, terminal gestures, a
   [clipboard menu](#clipboard), keyboard-aware viewport fitting, and 44px touch
@@ -365,8 +368,19 @@ detect silent network loss and show a connection error after missed replies.
 If a new connection needs a host-key check, **Return to open terminal** keeps
 the other shells available; select the connecting tab to resume the check.
 
+Select **Files** in a connected tab to browse that server. Enter a **Remote
+path**, select a directory, or choose **Upload file**. A matching remote name
+requires **Replace file** confirmation. Uploads stage to a temporary file, so
+a cancelled transfer leaves the previous file intact when cleanup succeeds.
+Select **Download file** beside a file to save it through the browser. Transfers
+run in 32 KiB chunks; the browser uses file storage when available, with a
+16 MiB memory fallback when it is not. On iPhone or iPad, use the browser's
+download, Share, or Save to Files action when prompted. If automatic saving is
+blocked, select **Save download** in the file panel. **Close files** leaves
+the terminal connected; disconnecting the tab stops its transfer.
+
 The toolbar's Help button opens a searchable guide to connection setup,
-host-key checks, saved hosts, terminal controls, keyboard shortcuts, copy and
+host-key checks, saved hosts, terminal controls, files, keyboard shortcuts, copy and
 paste, connection problems, privacy, and self-hosting. It works on the connect
 screen and during a session, ships with the app, and closes with Escape. Failed
 connections, the host-key prompts, the saved-hosts unlock and reset forms, and

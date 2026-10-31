@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 
@@ -111,6 +111,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const relayDir = path.resolve(frontendDir, "../relay");
   const previousSshdAddress = process.env.E2E_SSHD_ADDR;
   const keyDir = mkdtempSync(path.join(tmpdir(), "localssh-e2e-key-"));
+  const sftpRoot = path.join(keyDir, "sftp");
+  mkdirSync(sftpRoot);
   const previousKeyPath = process.env.E2E_KEY_PATH;
   const previousRejectedKeyPath = process.env.E2E_REJECTED_KEY_PATH;
 
@@ -149,6 +151,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
     sshd = spawn(path.join(engineDir, "dist/testsshd"), ["tester", "s3cret", authorizedKeys], {
       stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, E2E_SFTP_ROOT: sftpRoot },
     });
     const sshdStderr = captureStderr(sshd);
     process.env.E2E_SSHD_ADDR = await waitForOutput(

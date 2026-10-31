@@ -8,6 +8,7 @@ describe("help topics", () => {
       "Host keys",
       "Saved hosts",
       "Terminal",
+      "Files",
       "Keyboard shortcuts",
       "Copy and paste",
       "Connection problems",

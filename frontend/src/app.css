@@ -401,6 +401,81 @@ body:has(.app-shell--connect) {
   box-shadow: 0 18px 48px rgb(14 15 27 / 0.18);
 }
 
+.terminal-frame--files {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+}
+
+.file-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.file-panel__header,
+.file-panel__path,
+.file-panel__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.file-panel__header h2 {
+  margin: 0;
+}
+.file-panel button,
+.file-panel input {
+  min-height: 44px;
+}
+.file-panel button {
+  cursor: pointer;
+}
+.file-panel__path input {
+  min-width: 0;
+  width: 100%;
+}
+.file-panel__upload {
+  display: block;
+  margin-top: 12px;
+}
+.file-panel__upload input {
+  display: block;
+  max-width: 100%;
+}
+.file-panel__list {
+  padding: 0;
+  list-style: none;
+}
+.file-panel__list li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.file-panel__list li span {
+  overflow-wrap: anywhere;
+}
+.file-panel__confirm {
+  padding: 12px;
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 700px) {
+  .terminal-frame--files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .terminal-frame--files .terminal-frame__viewport,
+  .terminal-frame--files .file-panel {
+    grid-area: 1 / 1;
+  }
+  .terminal-frame--files .file-panel {
+    z-index: 1;
+    border-left: 0;
+  }
+}
+
 .terminal-frame__viewport {
   min-width: 0;
   min-height: 0;

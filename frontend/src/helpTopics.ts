@@ -6,6 +6,7 @@ export type HelpTopicId =
   | "host-key"
   | "saved-hosts"
   | "terminal"
+  | "files"
   | "shortcuts"
   | "clipboard"
   | "troubleshooting"
@@ -60,6 +61,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "On a touch screen, the key bar supplies Esc, Tab, arrows, and other shell keys. Tap Ctrl or Alt once for the next key, twice to lock it, and a third time to turn it off.",
       "Swipe right for Tab or left for Esc. Flick up or down near the prompt for command history. Drag with two fingers to scroll output. Long press and drag to select text.",
       "Use Appearance to change the terminal font, size, or color scheme.",
+    ],
+  },
+  {
+    id: "files",
+    label: "Files",
+    heading: "Browse and transfer files",
+    paragraphs: [
+      "Select Files in a connected terminal tab to browse that server. Enter a Remote path or open a directory. Each tab has its own file panel and SSH connection.",
+      "Select Upload file to choose one file from your device. If that name already exists, localssh asks before replacing it. Select Download file beside a remote file to save it on your device.",
+      "Cancel stops the current transfer. Closing Files leaves the terminal connected. Disconnecting closes both. A failed or cancelled upload keeps the previous remote file and removes its temporary copy when the server permits cleanup.",
+      "Downloads use browser file storage when available. Your browser may ask where to save the file or offer a Share or Save to Files action. If browser storage is unavailable, downloads are limited to 16 MiB.",
     ],
   },
   {

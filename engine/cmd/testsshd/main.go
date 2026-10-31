@@ -33,6 +33,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer server.Close()
+	if root := os.Getenv("E2E_SFTP_ROOT"); root != "" {
+		server.EnableSFTP(root)
+	}
 	if len(os.Args) == 4 {
 		if err := authorizeKeys(server, os.Args[3]); err != nil {
 			fmt.Fprintln(os.Stderr, "authorized keys:", err)

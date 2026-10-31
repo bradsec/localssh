@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeConnectionFailure } from "./connectionErrors.js";
+import { describeConnectionFailure, describeSftpFailure } from "./connectionErrors.js";
 
 // Raw strings as the engine and relay produce them, so a change on either side
 // that breaks the mapping fails here.
@@ -91,5 +91,21 @@ describe("describeConnectionFailure", () => {
     expect(failure.recovery).toBe(
       "This key format is not supported. Convert it with: ssh-keygen -p -f <keyfile>",
     );
+  });
+});
+
+describe("describeSftpFailure", () => {
+  it.each([
+    ["permission denied", "Cannot open /logs: permission denied. Check access on the server."],
+    ["no such file", "Cannot open /logs: no such file. Check the remote path."],
+    [
+      "no space left on device",
+      "Transfer of file.txt stopped: disk full. Free space on the server and try again.",
+    ],
+    ["transfer cancelled", "Transfer of file.txt stopped: transfer cancelled."],
+  ])("maps %s to a recovery message", (raw, message) => {
+    const failure = describeSftpFailure(raw, "/logs", "file.txt");
+    expect(failure.message).toBe(message);
+    expect(failure.topic).toBe("files");
   });
 });

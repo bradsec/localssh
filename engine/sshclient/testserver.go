@@ -6,10 +6,15 @@ import (
 	"crypto/rsa"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -27,6 +32,7 @@ type TestServer struct {
 
 	listener net.Listener
 	config   *ssh.ServerConfig
+	sftpRoot string
 
 	keysMu         sync.Mutex
 	authorizedKeys [][]byte
@@ -95,6 +101,10 @@ func NewTestServer(username, password string) (*TestServer, error) {
 
 func (s *TestServer) Close() error { return s.listener.Close() }
 
+// EnableSFTP serves a test-only file tree rooted at root on each connection.
+// Call before connecting clients.
+func (s *TestServer) EnableSFTP(root string) { s.sftpRoot = root }
+
 func (s *TestServer) serve() {
 	for {
 		netConn, err := s.listener.Accept()
@@ -129,14 +139,14 @@ func (s *TestServer) handleConn(netConn net.Conn) {
 			}()
 			continue
 		}
-		go handleSession(channel, requests, s.ExitAfterShell.Load())
+		go handleSession(channel, requests, s.ExitAfterShell.Load(), s.sftpRoot)
 	}
 }
 
 // handleSession implements just enough of the session channel protocol to
 // prove PTY I/O round-trips correctly: pty-req, shell, window-change. Once a
 // shell is requested it echoes whatever it reads back to the client.
-func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, exitAfterShell bool) {
+func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, exitAfterShell bool, sftpRoot string) {
 	defer channel.Close()
 	for req := range requests {
 		switch req.Type {
@@ -149,10 +159,137 @@ func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, exitAfterS
 				return
 			}
 			go echoLoop(channel)
+		case "subsystem":
+			if sftpRoot == "" || string(req.Payload) != "\x00\x00\x00\x04sftp" {
+				req.Reply(false, nil)
+				continue
+			}
+			req.Reply(true, nil)
+			h := &testSFTPFiles{root: sftpRoot}
+			_ = sftp.NewRequestServer(channel, sftp.Handlers{FileGet: h, FilePut: h, FileList: h, FileCmd: h}).Serve()
+			return
 		default:
 			req.Reply(false, nil)
 		}
 	}
+}
+
+type testSFTPFiles struct{ root string }
+
+func (h *testSFTPFiles) path(name string) (string, error) {
+	path := filepath.Join(h.root, strings.TrimPrefix(filepath.Clean("/"+name), "/"))
+	parent := path
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		parent = filepath.Dir(path)
+	}
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(h.root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", os.ErrPermission
+	}
+	return path, nil
+}
+
+func (h *testSFTPFiles) Fileread(r *sftp.Request) (io.ReaderAt, error) {
+	path, err := h.path(r.Filepath)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path)
+}
+
+func (h *testSFTPFiles) Filewrite(r *sftp.Request) (io.WriterAt, error) {
+	path, err := h.path(r.Filepath)
+	if err != nil {
+		return nil, err
+	}
+	flags := os.O_WRONLY
+	p := r.Pflags()
+	if p.Creat {
+		flags |= os.O_CREATE
+	}
+	if p.Trunc {
+		flags |= os.O_TRUNC
+	}
+	if p.Excl {
+		flags |= os.O_EXCL
+	}
+	return os.OpenFile(path, flags, 0600)
+}
+
+type testFileList []os.FileInfo
+
+func (l testFileList) ListAt(dst []os.FileInfo, offset int64) (int, error) {
+	if offset >= int64(len(l)) {
+		return 0, io.EOF
+	}
+	return copy(dst, l[offset:]), nil
+}
+
+func (h *testSFTPFiles) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
+	path, err := h.path(r.Filepath)
+	if err != nil {
+		return nil, err
+	}
+	if r.Method == "List" {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil, err
+		}
+		list := make(testFileList, 0, len(entries))
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, info)
+		}
+		return list, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	return testFileList{info}, nil
+}
+
+func (h *testSFTPFiles) Filecmd(r *sftp.Request) error {
+	name, err := h.path(r.Filepath)
+	if err != nil {
+		return err
+	}
+	switch r.Method {
+	case "Remove":
+		return os.Remove(name)
+	case "Rename":
+		target, err := h.path(r.Target)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Lstat(target); err == nil {
+			return os.ErrExist
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		return os.Rename(name, target)
+	default:
+		return os.ErrPermission
+	}
+}
+
+func (h *testSFTPFiles) PosixRename(r *sftp.Request) error {
+	name, err := h.path(r.Filepath)
+	if err != nil {
+		return err
+	}
+	target, err := h.path(r.Target)
+	if err != nil {
+		return err
+	}
+	return os.Rename(name, target)
 }
 
 func echoLoop(channel ssh.Channel) {

@@ -3,6 +3,7 @@ import { About } from "./components/About.js";
 import { ClipboardMenu } from "./components/ClipboardMenu.js";
 import { ConnectDialog, type ConnectFormValues } from "./components/ConnectDialog.js";
 import { ConnectionError } from "./components/ConnectionError.js";
+import { FilePanel } from "./components/FilePanel.js";
 import { HostKeyPrompt } from "./components/HostKeyPrompt.js";
 import { Help, HelpProvider } from "./components/Help.js";
 import { Icon } from "./components/Icon.js";
@@ -70,6 +71,7 @@ export function App() {
   const vault = useVault();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
+  const [fileTabs, setFileTabs] = useState<Set<number>>(() => new Set());
   const [hasOpenedTerminal, setHasOpenedTerminal] = useState(false);
   const [notice, setNotice] = useState("");
   const tabsRef = useRef<TerminalTab[]>([]);
@@ -231,6 +233,11 @@ export function App() {
         onClose: (reason) => {
           if (!tabsRef.current.includes(tab)) return;
           tab.handle = null;
+          setFileTabs((open) => {
+            const next = new Set(open);
+            next.delete(tab.id);
+            return next;
+          });
           tab.connecting = false;
           if (tabsRef.current.length === 1) {
             tab.controls?.reset();
@@ -329,6 +336,11 @@ export function App() {
       status.pending.password.privateKey.fill(0);
     }
     tabsRef.current = tabsRef.current.filter((entry) => entry.id !== id);
+    setFileTabs((open) => {
+      const next = new Set(open);
+      next.delete(id);
+      return next;
+    });
     tab.handle?.close();
     tab.controls?.reset();
     tab.controls?.blur();
@@ -386,6 +398,23 @@ export function App() {
             {activeTab && <span className="active-target">{activeTab.target}</span>}
           </div>
           <div className="toolbar-actions">
+            {activeTab?.handle && (
+              <button
+                className="toolbar-button"
+                type="button"
+                aria-pressed={fileTabs.has(activeTab.id)}
+                onClick={() => {
+                  setFileTabs((open) => {
+                    const next = new Set(open);
+                    if (next.has(activeTab.id)) next.delete(activeTab.id);
+                    else next.add(activeTab.id);
+                    return next;
+                  });
+                }}
+              >
+                Files
+              </button>
+            )}
             {activeTab?.handle && (
               <button
                 className="toolbar-button"
@@ -507,7 +536,7 @@ export function App() {
           )}
           {tabs.map((tab) => (
             <div
-              className="terminal-frame"
+              className={`terminal-frame${fileTabs.has(tab.id) ? " terminal-frame--files" : ""}`}
               id={`terminal-panel-${tab.id}`}
               role="tabpanel"
               aria-label={`${tab.host} terminal`}
@@ -540,6 +569,18 @@ export function App() {
                   active={activeId === tab.id && !!tab.handle}
                 />
               </div>
+              {fileTabs.has(tab.id) && tab.handle && (
+                <FilePanel
+                  handle={tab.handle}
+                  onClose={() => {
+                    setFileTabs((open) => {
+                      const next = new Set(open);
+                      next.delete(tab.id);
+                      return next;
+                    });
+                  }}
+                />
+              )}
             </div>
           ))}
         </div>

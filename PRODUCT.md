@@ -18,7 +18,7 @@ The browser cannot open raw TCP. The Go SSH engine runs as WebAssembly in the pa
 
 Saved hosts and optional saved passwords are encrypted under a master password in the browser profile. A forgotten master password cannot be recovered. Known host keys are remembered in that browser. The service has not been independently audited. The documented deployment is a firewalled LAN; direct public HTTP exposure is not recommended.
 
-K1 private-key authentication supports OpenSSH Ed25519, ECDSA, and RSA keys (with or without a passphrase), unencrypted PKCS#8 PEM, and legacy RSA or EC PEM (with or without a passphrase). Encrypted PKCS#8 PEM is unsupported. T1 multiple live terminal tabs keep separate SSH sessions in one page. F1 SFTP file movement remains an approved future feature, not a current capability. Large-download fallback is TBD.
+K1 private-key authentication supports OpenSSH Ed25519, ECDSA, and RSA keys (with or without a passphrase), unencrypted PKCS#8 PEM, and legacy RSA or EC PEM (with or without a passphrase). Encrypted PKCS#8 PEM is unsupported. T1 multiple live terminal tabs keep separate SSH sessions in one page. F1 SFTP browse, upload, and download runs on each tab's existing SSH connection. Downloads use browser file storage where available, with a 16 MiB memory fallback.
 
 ## Material inventory
 

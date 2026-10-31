@@ -6,8 +6,8 @@ user's device rather than on a server.
 
 | Package     | Role                                                                  |
 | ----------- | --------------------------------------------------------------------- |
-| `main`      | Exposes `sshConnect` on `window` and bridges callbacks to JavaScript.  |
-| `sshclient` | Handshake, password or key auth, host-key verification, PTY, and a test server. |
+| `main`      | Exposes `sshConnect` on `window` and bridges terminal and SFTP callbacks to JavaScript. |
+| `sshclient` | Handshake, password or key auth, host-key verification, PTY, and a test server with SFTP. |
 | `wsconn`    | A `net.Conn` over a browser WebSocket, so `sshclient` dials as if TCP.  |
 
 `sshclient` takes an already-established `net.Conn`, so the same code runs

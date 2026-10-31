@@ -152,3 +152,48 @@ export function describeConnectionFailure(raw: string): ConnectionFailure {
   const kind = PATTERNS.find(([pattern]) => pattern.test(raw))?.[1] ?? "unknown";
   return { kind, ...VARIANTS[kind] };
 }
+
+export function describeSftpFailure(
+  raw: string,
+  remotePath: string,
+  filename: string,
+): ConnectionFailure {
+  if (/permission denied|SSH_FX_PERMISSION_DENIED/i.test(raw)) {
+    return {
+      kind: "unknown",
+      message: `Cannot open ${remotePath}: permission denied. Check access on the server.`,
+      recovery: "",
+      topic: "files",
+    };
+  }
+  if (/no such file|not exist|SSH_FX_NO_SUCH_FILE/i.test(raw)) {
+    return {
+      kind: "unknown",
+      message: `Cannot open ${remotePath}: no such file. Check the remote path.`,
+      recovery: "",
+      topic: "files",
+    };
+  }
+  if (/no space left|disk full|quota exceeded/i.test(raw)) {
+    return {
+      kind: "unknown",
+      message: `Transfer of ${filename} stopped: disk full. Free space on the server and try again.`,
+      recovery: "",
+      topic: "files",
+    };
+  }
+  if (/transfer cancelled/i.test(raw)) {
+    return {
+      kind: "unknown",
+      message: `Transfer of ${filename} stopped: transfer cancelled.`,
+      recovery: "",
+      topic: "files",
+    };
+  }
+  return {
+    kind: "unknown",
+    message: `Transfer of ${filename} stopped: ${raw}. Try again after checking the connection.`,
+    recovery: "",
+    topic: "files",
+  };
+}

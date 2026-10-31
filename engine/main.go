@@ -203,7 +203,10 @@ type sessionBridge struct {
 	callbacks js.Value
 	// writes carries input to the session off the callback goroutine; see
 	// package writequeue for why a callback must not write directly.
-	writes *writequeue.Queue
+	writes  *writequeue.Queue
+	filesMu sync.Mutex
+	files   *sftpBridge
+	closed  bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -249,12 +252,14 @@ func (b *sessionBridge) handle() js.Value {
 		}
 		return nil
 	})
-	b.funcs = []js.Func{write, resize, closeSession}
+	openFiles := js.FuncOf(func(this js.Value, args []js.Value) any { return b.openFiles() })
+	b.funcs = []js.Func{write, resize, closeSession, openFiles}
 
 	return js.ValueOf(map[string]any{
-		"write":  write,
-		"resize": resize,
-		"close":  closeSession,
+		"write":     write,
+		"resize":    resize,
+		"close":     closeSession,
+		"openFiles": openFiles,
 	})
 }
 
@@ -296,6 +301,13 @@ func (b *sessionBridge) close(reason func() string) error {
 	b.closeOnce.Do(func() {
 		b.cancel()
 		b.writes.Close()
+		b.filesMu.Lock()
+		b.closed = true
+		files := b.files
+		b.filesMu.Unlock()
+		if files != nil {
+			go func() { _ = files.close() }()
+		}
 		b.closeErr = b.session.Close()
 		message := ""
 		if reason != nil {

@@ -2,6 +2,30 @@ export interface SshHandle {
   write(chunk: Uint8Array): string | null;
   resize(cols: number, rows: number): void;
   close(): void;
+  openFiles?(): Promise<SftpHandle>;
+}
+
+export interface RemoteFile {
+  name: string;
+  isDir: boolean;
+  size: number;
+}
+
+export interface SftpHandle {
+  list(path: string): Promise<RemoteFile[]>;
+  upload(
+    path: string,
+    file: File,
+    overwrite: boolean,
+    onProgress: (percent: number) => void,
+  ): Promise<void>;
+  download(
+    path: string,
+    onChunk: (chunk: Uint8Array) => Promise<void>,
+    onProgress: (percent: number) => void,
+  ): Promise<void>;
+  cancel(): void;
+  close(): void;
 }
 
 declare global {

@@ -152,6 +152,51 @@ describe("App", () => {
     );
   });
 
+  it("keeps each tab's file panel on its own SSH handle", async () => {
+    const firstFiles: engine.SftpHandle = {
+      list: vi.fn().mockResolvedValue([{ name: "first.txt", isDir: false, size: 1 }]),
+      upload: vi.fn(),
+      download: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
+    };
+    const secondFiles: engine.SftpHandle = {
+      list: vi.fn().mockResolvedValue([{ name: "second.txt", isDir: false, size: 2 }]),
+      upload: vi.fn(),
+      download: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
+    };
+    const first: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      openFiles: vi.fn().mockResolvedValue(firstFiles),
+    };
+    const second: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      openFiles: vi.fn().mockResolvedValue(secondFiles),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "Files" }));
+    await screen.findByText("first.txt");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+    await user.click(screen.getByRole("button", { name: "Files" }));
+    await screen.findByText("second.txt");
+    expect(screen.getByText("first.txt")).not.toBeVisible();
+    await user.click(screen.getByRole("tab", { name: /first.example, connected/i }));
+    expect(screen.getByText("first.txt")).toBeVisible();
+    expect(screen.getByText("second.txt")).not.toBeVisible();
+    expect(first.openFiles).toHaveBeenCalledOnce();
+    expect(second.openFiles).toHaveBeenCalledOnce();
+  });
+
   it("routes touch keys and keyboard tab switching to the selected SSH session", async () => {
     usePointer("coarse");
     const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
