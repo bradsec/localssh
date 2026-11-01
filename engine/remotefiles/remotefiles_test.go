@@ -104,13 +104,42 @@ func TestListResolvesLinksAndPath(t *testing.T) {
 		t.Fatalf("entries: %+v", entries)
 	}
 	for name, entry := range want {
-		if got[name] != entry {
-			t.Errorf("%s: got %+v, want %+v", name, got[name], entry)
+		actual := got[name]
+		actual.ModTime, actual.Mode = 0, ""
+		if actual != entry {
+			t.Errorf("%s: got %+v, want %+v", name, actual, entry)
+		}
+	}
+	for link, target := range map[string]string{"logs-link": "logs", "notes-link": "notes.txt"} {
+		if got[link].ModTime != got[target].ModTime || got[link].Mode != got[target].Mode {
+			t.Errorf("%s metadata differs from %s: %+v vs %+v", link, target, got[link], got[target])
 		}
 	}
 	sub, _, _, err := List(client, "logs", time.Now())
 	if err != nil || sub != "/logs" {
 		t.Fatalf("subfolder path %q, err %v", sub, err)
+	}
+}
+
+func TestListIncludesModifiedTimeAndPermissions(t *testing.T) {
+	client, root := connect(t)
+	name := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(name, []byte("hello"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	modified := time.Date(2024, time.March, 2, 11, 12, 13, 0, time.UTC)
+	if err := os.Chtimes(name, modified, modified); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, _, err := List(client, "/", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries: %+v", entries)
+	}
+	if got := entries[0]; got.ModTime != modified.UnixMilli() || got.Mode != "rw-r-----" {
+		t.Fatalf("metadata: %+v", got)
 	}
 }
 

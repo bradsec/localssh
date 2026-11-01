@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Help, HelpProvider } from "./Help.js";
 import { FilePanel } from "./FilePanel.js";
+import { ToastProvider } from "./Toasts.js";
 import { displayName, sweepDownloads } from "../remoteFiles.js";
 import type { RemoteFile, RemoteListing, SftpHandle, SshHandle } from "../ssh/engine.js";
 
@@ -21,18 +22,24 @@ function makeFiles(overrides: Partial<SftpHandle> = {}): SftpHandle {
   };
 }
 
-function renderPanel(files: SftpHandle, onClose = vi.fn()) {
+function renderPanel(
+  files: SftpHandle,
+  onClose = vi.fn(),
+  openFiles = vi.fn().mockResolvedValue(files),
+) {
   const handle: SshHandle = {
     write: vi.fn(),
     resize: vi.fn(),
     close: vi.fn(),
-    openFiles: vi.fn().mockResolvedValue(files),
+    openFiles,
   };
   const view = render(
-    <HelpProvider>
-      <FilePanel handle={handle} onClose={onClose} />
-      <Help />
-    </HelpProvider>,
+    <ToastProvider>
+      <HelpProvider>
+        <FilePanel handle={handle} onClose={onClose} expanded={false} onExpand={() => {}} />
+        <Help />
+      </HelpProvider>
+    </ToastProvider>,
   );
   return { ...view, onClose, user: userEvent.setup() };
 }
@@ -100,7 +107,7 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, "storage");
 });
 
-it("cancels an upload and offers file recovery help", async () => {
+it("cancels an upload and shows an informational toast", async () => {
   let rejectUpload!: (reason: string) => void;
   const files = makeFiles({
     upload: vi.fn().mockImplementation(
@@ -116,41 +123,103 @@ it("cancels an upload and offers file recovery help", async () => {
   await screen.findByText(/Uploading sample.txt: 0%/);
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(files.cancel).toHaveBeenCalledOnce();
-  rejectUpload("transfer cancelled");
+  rejectUpload("connection closed");
   expect(
-    await screen.findByText("Transfer of sample.txt stopped: transfer cancelled."),
+    await screen.findByText("Files is no longer connected. Close Files and select Files again, or reconnect the tab."),
   ).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Learn more about files" }));
-  expect(screen.getByRole("heading", { name: "Browse and transfer files" })).toBeVisible();
+  expect(document.querySelector(".toast--info")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Learn more about files" })).toBeNull();
 });
 
 describe("browsing", () => {
+  it("sorts by size while folders remain first", async () => {
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(
+        listing("/srv", [
+          { name: "large.txt", kind: "file", isLink: false, size: 20, mtime: 0, mode: "rw-r--r--" },
+          { name: "folder", kind: "folder", isLink: false, size: 0, mtime: 0, mode: "rwxr-xr-x" },
+          { name: "small.txt", kind: "file", isLink: false, size: 2, mtime: 0, mode: "rw-r--r--" },
+        ]),
+      ),
+    });
+    const { user } = renderPanel(files);
+    await screen.findByText("large.txt");
+    await user.click(screen.getByRole("button", { name: "Size" }));
+    expect(
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.textContent),
+    ).toEqual([
+      expect.stringContaining("folder"),
+      expect.stringContaining("small.txt"),
+      expect.stringContaining("large.txt"),
+    ]);
+  });
+
+  it("opens a folder from a breadcrumb", async () => {
+    const files = makeFiles({
+      list: vi
+        .fn()
+        .mockResolvedValueOnce(listing("/home/tester/logs"))
+        .mockResolvedValueOnce(listing("/home/tester")),
+    });
+    const { user } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "tester" }));
+    expect(files.list).toHaveBeenLastCalledWith("/home/tester");
+  });
+
+  it("moves row selection with arrows and opens a folder with Enter", async () => {
+    const files = makeFiles({
+      list: vi
+        .fn()
+        .mockResolvedValueOnce(
+          listing("/srv", [
+            { name: "alpha", kind: "folder", isLink: false, size: 0, mtime: 0, mode: "rwxr-xr-x" },
+            { name: "beta", kind: "folder", isLink: false, size: 0, mtime: 0, mode: "rwxr-xr-x" },
+          ]),
+        )
+        .mockResolvedValueOnce(listing("/srv/beta")),
+    });
+    const { user } = renderPanel(files);
+    const first = (await screen.findByText("alpha/")).closest("tr")!;
+    first.focus();
+    await user.keyboard("{ArrowDown}");
+    const second = screen.getByText("beta/").closest("tr")!;
+    expect(second).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+    expect(files.list).toHaveBeenLastCalledWith("/srv/beta");
+  });
+
   it("labels links and opens folders through them", async () => {
     const files = makeFiles({
       list: vi
         .fn()
         .mockResolvedValueOnce(
           listing("/home/tester", [
-            { name: "logs", kind: "folder", isLink: true, size: 4096 },
-            { name: "notes", kind: "file", isLink: true, size: 12 },
-            { name: "gone", kind: "broken", isLink: true, size: 0 },
-            { name: "fifo", kind: "other", isLink: false, size: 0 },
+            { name: "logs", kind: "folder", isLink: true, size: 4096, mtime: 0, mode: "rwxr-xr-x" },
+            { name: "notes", kind: "file", isLink: true, size: 12, mtime: 0, mode: "rw-r--r--" },
+            { name: "gone", kind: "broken", isLink: true, size: 0, mtime: 0, mode: "" },
+            { name: "fifo", kind: "other", isLink: false, size: 0, mtime: 0, mode: "" },
           ]),
         )
         .mockResolvedValueOnce(listing("/data/logs")),
     });
     const { user } = renderPanel(files);
-    expect(await screen.findByText("Link to folder")).toBeVisible();
-    expect(screen.getByText("Link to file, 12 bytes")).toBeVisible();
-    expect(screen.getByText("Broken link")).toBeVisible();
-    expect(screen.getByText("Special file")).toBeVisible();
+    expect(await screen.findByText("logs/")).toBeVisible();
+    expect(screen.getByText("notes")).toBeVisible();
+    expect(screen.getByText("gone")).toBeVisible();
+    expect(screen.getByText("fifo")).toBeVisible();
     expect(screen.getByRole("button", { name: "Download file notes" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Download file gone" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Download file fifo" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Download file logs" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "logs/" }));
+    await user.dblClick(screen.getByText("logs/"));
     expect(files.list).toHaveBeenLastCalledWith("/home/tester/logs");
-    expect(await screen.findByText("/data/logs")).toBeVisible();
+    expect(await screen.findByRole("navigation", { name: "Current folder" })).toHaveTextContent(
+      "logs",
+    );
+    await user.click(screen.getByRole("button", { name: "Go to path" }));
     expect(screen.getByLabelText("Remote path")).toHaveValue("/data/logs");
   });
 
@@ -163,10 +232,16 @@ describe("browsing", () => {
         .mockResolvedValueOnce(listing("/")),
     });
     const { user } = renderPanel(files);
-    expect(await screen.findByText("/home/tester")).toBeVisible();
+    expect(await screen.findByRole("navigation", { name: "Current folder" })).toHaveTextContent(
+      "tester",
+    );
     await user.click(screen.getByRole("button", { name: "Up to parent folder" }));
     expect(files.list).toHaveBeenLastCalledWith("/home");
-    await screen.findByText("/home");
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "Current folder" })).not.toHaveTextContent(
+        "tester",
+      ),
+    );
     await user.click(screen.getByRole("button", { name: "Up to parent folder" }));
     expect(files.list).toHaveBeenLastCalledWith("/");
     await waitFor(() =>
@@ -179,7 +254,11 @@ describe("browsing", () => {
     const files = makeFiles({
       list: vi
         .fn()
-        .mockResolvedValue(listing("/srv", [{ name, kind: "file", isLink: false, size: 1 }])),
+        .mockResolvedValue(
+          listing("/srv", [
+            { name, kind: "file", isLink: false, size: 1, mtime: 0, mode: "rw-r--r--" },
+          ]),
+        ),
       download: downloadOneChunk,
     });
     const { user } = renderPanel(files);
@@ -205,6 +284,23 @@ it("keeps names without unsafe characters unchanged", () => {
 });
 
 describe("replace", () => {
+  it("uses the same overwrite confirmation for a dropped file", async () => {
+    const files = makeFiles({ upload: vi.fn().mockRejectedValueOnce("remote file exists") });
+    renderPanel(files);
+    await screen.findByText("No files in this directory. Choose another path or upload a file.");
+    const file = new File(["new"], "deploy.sh");
+    fireEvent.drop(screen.getByRole("region", { name: "Files" }), {
+      dataTransfer: { files: [file] },
+    });
+    expect(await screen.findByRole("alertdialog", { name: "Replace file" })).toBeVisible();
+    expect(files.upload).toHaveBeenCalledWith(
+      "/home/tester/deploy.sh",
+      file,
+      false,
+      expect.any(Function),
+    );
+  });
+
   it("asks before replacing when the engine finds the file, then overwrites", async () => {
     const files = makeFiles({
       upload: vi.fn().mockRejectedValueOnce("remote file exists").mockResolvedValueOnce(null),
@@ -236,6 +332,20 @@ describe("replace", () => {
 });
 
 describe("closing", () => {
+  it("retries opening Files after an initial connection failure", async () => {
+    const files = makeFiles();
+    const openFiles = vi
+      .fn()
+      .mockRejectedValueOnce("permission denied")
+      .mockResolvedValueOnce(files);
+    const { user } = renderPanel(files, vi.fn(), openFiles);
+    await screen.findByText(/Cannot open/);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(openFiles).toHaveBeenCalledTimes(2);
+    expect(
+      await screen.findByText("No files in this directory. Choose another path or upload a file."),
+    ).toBeVisible();
+  });
   it("asks before closing during a transfer", async () => {
     const files = makeFiles({
       upload: vi.fn(() => new Promise<void>(() => {})),
@@ -266,7 +376,7 @@ describe("closing", () => {
     // A released engine function returns undefined rather than a Promise.
     const files = makeFiles({ list: vi.fn().mockReturnValue(undefined) });
     renderPanel(files);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Files is no longer connected");
+    expect(await screen.findByText(/Files is no longer connected/)).toBeVisible();
   });
 });
 
@@ -275,12 +385,16 @@ describe("listing cap", () => {
     const files = makeFiles({
       list: vi.fn().mockResolvedValue({
         path: "/srv",
-        entries: [{ name: "a.txt", kind: "file", isLink: false, size: 3 }],
+        entries: [
+          { name: "a.txt", kind: "file", isLink: false, size: 3, mtime: 0, mode: "rw-r--r--" },
+        ],
         truncated: true,
       }),
     });
     renderPanel(files);
-    expect(await screen.findByText("Showing the first 10,000 items in this folder.")).toBeVisible();
+    expect(
+      (await screen.findAllByText("Showing the first 10,000 items in this folder.")).length,
+    ).toBe(2);
   });
 });
 
@@ -291,7 +405,9 @@ describe("downloads", () => {
       list: vi
         .fn()
         .mockResolvedValue(
-          listing("/srv", [{ name: "a.txt", kind: "file", isLink: false, size: 3 }]),
+          listing("/srv", [
+            { name: "a.txt", kind: "file", isLink: false, size: 3, mtime: 0, mode: "rw-r--r--" },
+          ]),
         ),
       download: downloadOneChunk,
     });
@@ -307,11 +423,18 @@ describe("downloads", () => {
     for (const writable of [true, false]) {
       fakeDirectory({ writable });
       const files = makeFiles({
-        list: vi
-          .fn()
-          .mockResolvedValue(
-            listing("/srv", [{ name: "a.log", kind: "file", isLink: false, size: 1234 }]),
-          ),
+        list: vi.fn().mockResolvedValue(
+          listing("/srv", [
+            {
+              name: "a.log",
+              kind: "file",
+              isLink: false,
+              size: 1234,
+              mtime: 0,
+              mode: "rw-r--r--",
+            },
+          ]),
+        ),
         download: vi.fn(async (_p: string, onChunk: (c: Uint8Array) => Promise<void>) => {
           await onChunk(new Uint8Array([1, 2, 3]));
           return { grew: true, size: 1234 };
@@ -332,7 +455,9 @@ describe("downloads", () => {
       list: vi
         .fn()
         .mockResolvedValue(
-          listing("/srv", [{ name: "a.txt", kind: "file", isLink: false, size: 3 }]),
+          listing("/srv", [
+            { name: "a.txt", kind: "file", isLink: false, size: 3, mtime: 0, mode: "rw-r--r--" },
+          ]),
         ),
       download: downloadOneChunk,
     });
@@ -356,7 +481,9 @@ describe("downloads", () => {
       list: vi
         .fn()
         .mockResolvedValue(
-          listing("/srv", [{ name: "a.txt", kind: "file", isLink: false, size: 3 }]),
+          listing("/srv", [
+            { name: "a.txt", kind: "file", isLink: false, size: 3, mtime: 0, mode: "rw-r--r--" },
+          ]),
         ),
       download: downloadOneChunk,
     });

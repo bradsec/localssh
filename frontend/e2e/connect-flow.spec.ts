@@ -89,6 +89,7 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
   await expect(
     page.getByText("No files in this directory. Choose another path or upload a file."),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Go to path" }).click();
   await page.getByLabel("Remote path").fill("/missing");
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(
@@ -99,14 +100,14 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByLabel("Remote path").fill(".");
   await page.getByRole("button", { name: "Open", exact: true }).click();
-  await expect(page.getByText("Current folder: /", { exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Current folder" })).toContainText("/");
   await expect(page.getByRole("button", { name: "Up to parent folder" })).toBeDisabled();
   await page.getByLabel("Upload file").setInputFiles({
     name: "sample.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("SFTP round trip"),
   });
-  await expect(page.getByText("Uploaded sample.txt.")).toBeVisible();
+  await expect(page.locator(".toast").getByText("Uploaded sample.txt.")).toBeVisible();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download file sample.txt" }).click();
   const saved = await download;
@@ -130,7 +131,7 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
     buffer: Buffer.from("replacement"),
   });
   await page.getByRole("button", { name: "Replace file" }).click();
-  await expect(page.getByText("Uploaded sample.txt.")).toBeVisible();
+  await expect(page.locator(".toast").getByText("Uploaded sample.txt.")).toBeVisible();
   const replacementDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download file sample.txt" }).click();
   const replaced = await replacementDownload;
@@ -142,21 +143,31 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
   const root = process.env.E2E_SFTP_ROOT!;
   mkdirSync(path.join(root, "logs"));
   writeFileSync(path.join(root, "logs", "app.log"), "log line");
+  writeFileSync(path.join(root, "large.bin"), "a".repeat(100));
   symlinkSync("logs", path.join(root, "logs-link"));
   symlinkSync("missing", path.join(root, "broken-link"));
   await page.getByRole("button", { name: "Open", exact: true }).click();
   const files = page.getByRole("region", { name: "Files" });
-  await expect(files.getByRole("listitem").filter({ hasText: "logs-link" })).toContainText(
-    "Link to folder",
+  await expect(files.getByRole("row").filter({ hasText: "logs-link" })).toContainText("logs-link");
+  await expect(files.getByRole("row").filter({ hasText: "broken-link" })).toContainText(
+    "broken-link",
   );
-  await expect(files.getByRole("listitem").filter({ hasText: "broken-link" })).toContainText(
-    "Broken link",
+  await files.getByRole("button", { name: "Size", exact: true }).click();
+  const rows = files.locator("tbody tr");
+  await expect(rows.first()).toContainText("logs");
+  await expect(rows.filter({ hasText: "sample.txt" })).toBeVisible();
+  await files.getByText("logs-link/").dblclick();
+  await expect(files.getByRole("navigation", { name: "Current folder" })).toContainText(
+    "logs-link",
   );
-  await page.getByRole("button", { name: "logs-link/" }).click();
-  await expect(page.getByText("Current folder: /logs-link", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download file app.log" })).toBeVisible();
-  await page.getByRole("button", { name: "Up to parent folder" }).click();
-  await expect(page.getByText("Current folder: /", { exact: true })).toBeVisible();
+  await files
+    .getByRole("navigation", { name: "Current folder" })
+    .getByRole("button", { name: "/", exact: true })
+    .click();
+  await expect(files.getByRole("navigation", { name: "Current folder" })).not.toContainText(
+    "logs-link",
+  );
   await expect(page.getByRole("button", { name: "Download file sample.txt" })).toBeVisible();
   expect(readdirSync(root).filter((name) => name.startsWith(".localssh-upload-"))).toEqual([]);
   await page.getByRole("button", { name: "Close files" }).click();

@@ -28,9 +28,14 @@ others discover the project.
   scrollback, automatic PTY resizing, and full-screen sessions.
 - **Multiple live terminals.** Open another server without closing current
   shells. Each tab has its own SSH session, output, and terminal size.
-- **SFTP files.** Browse remote directories, upload a selected file with progress
-  and cancel, and download a remote file from each terminal tab. Replacing an
-  existing file requires confirmation.
+- **SFTP files.** Browse remote directories with breadcrumbs, sortable file
+  details, and keyboard navigation. Upload by choosing or dropping a file,
+  watch transfer progress, and download from each connected tab. Replacing an
+  existing file requires confirmation. On desktop, expand Files to use the
+  full session area while the terminal stays connected.
+- **Task notifications.** Short messages confirm transfers, clipboard actions,
+  address book changes, and session endings. Hover or focus a message to keep
+  it visible while you read it.
 - **In-app help.** Searchable help covers connection, host keys, files, touch
   controls, privacy, and recovery without leaving the app.
 - **Phone and tablet controls.** The responsive interface includes a
@@ -447,11 +452,11 @@ If a new connection needs a host-key check, **Return to open terminal** keeps
 the other shells available; select the connecting tab to resume the check.
 
 Select **Files** in a connected tab (under **Actions** below 1024px wide) to
-browse that server. The panel shows the
-current folder; enter a **Remote path**, select a folder (including a link to a
-folder), or select **Up** for the parent folder. Each entry shows whether it is
-a file, folder, link, broken link, or special file. Choose **Upload file** to
-send one file. If the name already exists on the server, localssh asks before
+browse that server. Breadcrumbs open earlier folders; **Go to path** opens the
+**Remote path** field. Double-click a folder, including a link to a folder,
+or select **Up** for its parent. Columns sort by name, size, modified time,
+or permissions. Choose **Upload** or drop a file onto Files. If the name already
+exists on the server, localssh asks before
 replacing it; the replacement keeps the old file's permissions but not its
 owner or access lists, and a link at that name is replaced, not followed.
 Uploads stage to a hidden `.localssh-upload-*` file. A failed replacement on a
@@ -459,7 +464,7 @@ server without `posix-rename@openssh.com` can remove the old file; the error
 names the staged copy to recover. Closing Files or disconnecting waits
 up to 10 seconds for that file to be removed; a stage file left behind by a
 lost connection is removed the next time its folder is listed after 24 hours.
-Select **Download file** beside a file to save it through the browser.
+Select the download action beside a file to save it through the browser.
 Transfers keep up to 16 requests of 32 KiB in flight; the browser uses file
 storage when available, with a 16 MiB memory fallback when it is not. On
 iPhone or iPad, use the browser's download, Share, or Save to Files action when

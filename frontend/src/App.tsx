@@ -29,6 +29,7 @@ import { loadTerminalFont } from "./terminalFonts.js";
 import { DEFAULT_THEME_NAME, TERMINAL_THEMES } from "./terminalThemes.js";
 import { trackViewportHeight } from "./viewportHeight.js";
 import { useVault } from "./vault/useVault.js";
+import { ToastProvider, useToast } from "./components/Toasts.js";
 
 const RELAY_WS_URL = resolveRelayWsUrl(import.meta.env.VITE_RELAY_WS_URL, window.location);
 const ENCODER = new TextEncoder();
@@ -94,12 +95,21 @@ type TerminalTab = {
 };
 
 export function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
+  );
+}
+
+function AppContent() {
+  const toast = useToast();
   const vault = useVault();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [fileTabs, setFileTabs] = useState<Set<number>>(() => new Set());
+  const [expandedFiles, setExpandedFiles] = useState<Set<number>>(() => new Set());
   const [hasOpenedTerminal, setHasOpenedTerminal] = useState(false);
-  const [notice, setNotice] = useState("");
   const tabsRef = useRef<TerminalTab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const activeIdRef = useRef<number | null>(null);
@@ -131,7 +141,6 @@ export function App() {
     updateModifiers(NO_MODIFIERS);
     setTerminalFocused(false);
     setTerminalHasSelection(false);
-    setNotice("");
     if (id !== null)
       requestAnimationFrame(() => {
         document
@@ -261,6 +270,10 @@ export function App() {
         },
         onClose: (reason) => {
           if (!tabsRef.current.includes(tab)) return;
+          toast(
+            reason ? `Session lost: ${tab.host}. ${reason}` : `Session ended: ${tab.host}.`,
+            reason ? "error" : "info",
+          );
           tab.handle = null;
           setFileTabs((open) => {
             const next = new Set(open);
@@ -279,7 +292,6 @@ export function App() {
             tabsRef.current = tabsRef.current.filter((entry) => entry !== tab);
             setTabs(tabsRef.current);
             if (activeIdRef.current === tab.id) selectTab(tabsRef.current.at(-1)?.id ?? null);
-            setNotice(`${tab.host} disconnected. Other terminals are still open.`);
           } else {
             tab.lostReason = reason;
             setTabs([...tabsRef.current]);
@@ -370,14 +382,18 @@ export function App() {
       next.delete(id);
       return next;
     });
+    setExpandedFiles((open) => {
+      const next = new Set(open);
+      next.delete(id);
+      return next;
+    });
     tab.handle?.close();
     tab.controls?.reset();
     tab.controls?.blur();
     setTabs(tabsRef.current);
     if (activeIdRef.current === id) selectTab(tabsRef.current.at(-1)?.id ?? null);
     if (!tabsRef.current.some((entry) => entry.connecting)) setStatus({ kind: "idle" });
-    if (tabsRef.current.length > 0)
-      setNotice(`${tab.host} disconnected. Other terminals are still open.`);
+    toast(`Session ended: ${tab.host}.`, "info");
   };
 
   useEffect(() => {
@@ -540,11 +556,6 @@ export function App() {
               </button>
             </div>
           )}
-          {notice && (
-            <p className="terminal-tabs__notice" role="status">
-              {notice}
-            </p>
-          )}
 
           <div className="workspace">
             {!activeTab && (
@@ -587,7 +598,7 @@ export function App() {
             )}
             {tabs.map((tab) => (
               <div
-                className={`terminal-frame${fileTabs.has(tab.id) ? " terminal-frame--files" : ""}`}
+                className={`terminal-frame${fileTabs.has(tab.id) ? " terminal-frame--files" : ""}${expandedFiles.has(tab.id) ? " terminal-frame--files-expanded" : ""}`}
                 id={`terminal-panel-${tab.id}`}
                 role="tabpanel"
                 aria-label={`${tab.host} terminal`}
@@ -623,6 +634,15 @@ export function App() {
                 {fileTabs.has(tab.id) && tab.handle && (
                   <FilePanel
                     handle={tab.handle}
+                    expanded={expandedFiles.has(tab.id)}
+                    onExpand={() =>
+                      setExpandedFiles((open) => {
+                        const next = new Set(open);
+                        if (next.has(tab.id)) next.delete(tab.id);
+                        else next.add(tab.id);
+                        return next;
+                      })
+                    }
                     onClose={() => {
                       setFileTabs((open) => {
                         const next = new Set(open);

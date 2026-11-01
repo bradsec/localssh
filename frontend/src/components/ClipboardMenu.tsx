@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Clipboard } from "lucide-react";
 import { LearnMore } from "./Help.js";
 import { readClipboardText, writeClipboardText } from "../clipboard.js";
+import { useToast } from "./Toasts.js";
 
 export interface ClipboardMenuProps {
   /** Whether the terminal currently holds a selection that can be copied. */
@@ -22,6 +23,7 @@ export interface ClipboardMenuProps {
  * pasting into the field with the on-screen callout always works.
  */
 export function ClipboardMenu({ hasSelection, getSelection, onPaste }: ClipboardMenuProps) {
+  const toast = useToast();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const pasteFieldRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
@@ -71,10 +73,12 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
     setCopied(ok);
     setBlocked(!ok);
     setManualCopy(ok ? "" : text);
-    setStatus(
+    setStatus(ok ? "" : "The browser blocked the copy. Select the text below and use your device's Copy action.");
+    toast(
       ok
         ? "Copied the selection."
         : "The browser blocked the copy. Select the text below and use your device's Copy action.",
+      ok ? "success" : "warning",
     );
   };
 

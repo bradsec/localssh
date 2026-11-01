@@ -14,6 +14,9 @@ export interface RemoteFile {
   isLink: boolean;
   /** Size of the file, or of a link's target. */
   size: number;
+  /** Unix milliseconds and rwx permissions from the remote file. */
+  mtime: number;
+  mode: string;
 }
 
 export interface RemoteListing {

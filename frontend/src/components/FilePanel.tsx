@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { ArrowUp, Download, Maximize2, Minimize2, RefreshCw, Upload } from "lucide-react";
 import { describeSftpFailure } from "../connectionErrors.js";
 import {
   openFiles,
@@ -16,6 +17,15 @@ import {
   sweepDownloads,
 } from "../remoteFiles.js";
 import { LearnMore } from "./Help.js";
+import { useToast } from "./Toasts.js";
+import {
+  breadcrumbs,
+  fileIcon,
+  formatBytes,
+  sortEntries,
+  type SortColumn,
+  type SortDirection,
+} from "../fileExplorer.js";
 
 const FALLBACK_LIMIT = 16 * 1024 * 1024;
 
@@ -136,9 +146,21 @@ function releaseHeld(slot: { current: HeldSlot }) {
   slot.current = null;
 }
 
-export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () => void }) {
+export function FilePanel({
+  handle,
+  onClose,
+  expanded,
+  onExpand,
+}: {
+  handle: SshHandle;
+  onClose: () => void;
+  expanded: boolean;
+  onExpand: () => void;
+}) {
+  const toast = useToast();
   const pathId = useId();
   const [files, setFiles] = useState<SftpHandle | null>(null);
+  const [retryOpen, setRetryOpen] = useState(0);
   const [path, setPath] = useState(".");
   const [pathInput, setPathInput] = useState(".");
   const [entries, setEntries] = useState<RemoteFile[]>([]);
@@ -151,7 +173,14 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
   const [pendingReplace, setPendingReplace] = useState<File | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [truncated, setTruncated] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [sort, setSort] = useState<{ column: SortColumn; direction: SortDirection }>({
+    column: "name",
+    direction: "asc",
+  });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [pathOpen, setPathOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const cancelled = useRef(false);
   const [downloadLink, setDownloadLink] = useState<{ url: string; name: string } | null>(null);
   const [failure, setFailure] = useState<{ raw: string; path: string; name: string } | null>(null);
   const held = useRef<HeldSlot>(null);
@@ -183,6 +212,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
           if (disposed) return;
           setEntries(listing.entries);
           setTruncated(!!listing.truncated);
+          if (listing.truncated) toast("Showing the first 10,000 items in this folder.", "warning");
           setPath(listing.path);
           setPathInput(listing.path);
         } catch (error) {
@@ -201,7 +231,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
       disposed = true;
       client?.close();
     };
-  }, [handle]);
+  }, [handle, toast, retryOpen]);
 
   const browse = async (next: string) => {
     if (!files || !next.trim()) return;
@@ -211,9 +241,10 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
       const listing = await files.list(next.trim());
       setEntries(listing.entries);
       setTruncated(!!listing.truncated);
+      if (listing.truncated) toast("Showing the first 10,000 items in this folder.", "warning");
       setPath(listing.path);
       setPathInput(listing.path);
-      setNotice("");
+      setSelected(null);
     } catch (error) {
       setFailure({ raw: String(error), path: displayName(next.trim()), name: "files" });
     } finally {
@@ -225,7 +256,7 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
     releaseDownload();
     setPendingReplace(null);
     setFailure(null);
-    setNotice("");
+    cancelled.current = false;
     setDownloadLink(null);
     setBusy({ kind, name, percent: 0 });
   };
@@ -242,10 +273,15 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
       const refreshed = await files.list(path);
       setEntries(refreshed.entries);
       setTruncated(!!refreshed.truncated);
-      setNotice(`Uploaded ${shown}.`);
+      if (refreshed.truncated) toast("Showing the first 10,000 items in this folder.", "warning");
+      toast(`Uploaded ${shown}.`, "success");
     } catch (error) {
       if (!overwrite && String(error).includes(REMOTE_FILE_EXISTS)) setPendingReplace(file);
-      else setFailure({ raw: String(error), path: displayName(remotePath), name: shown });
+      else
+        toast(
+          describeSftpFailure(String(error), displayName(remotePath), shown).message,
+          cancelled.current || String(error).includes("cancel") ? "info" : "error",
+        );
     } finally {
       setBusy(null);
     }
@@ -268,24 +304,80 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
         }, DOWNLOAD_KEEP_MS),
       };
       setDownloadLink({ url: received.url, name: shown });
-      setNotice(
+      toast(
         received.result?.grew
           ? `The file grew while downloading. Saved the first ${received.result.size.toLocaleString()} bytes.`
           : `Downloaded ${shown}.`,
+        received.result?.grew ? "warning" : "success",
       );
     } catch (error) {
-      setFailure({ raw: String(error), path: displayName(remotePath), name: shown });
+      toast(describeSftpFailure(String(error), displayName(remotePath), shown).message, "error");
     } finally {
       setBusy(null);
     }
   };
 
   const atRoot = path === "/";
+  const shownEntries = sortEntries(entries, sort.column, sort.direction);
+  const chooseSort = (column: SortColumn) =>
+    setSort((current) => ({
+      column,
+      direction: current.column === column && current.direction === "asc" ? "desc" : "asc",
+    }));
+  const moveSelection = (step: number) => {
+    if (!shownEntries.length) return;
+    const index =
+      selected === null ? 0 : shownEntries.findIndex((entry) => entry.name === selected);
+    const next = shownEntries[Math.max(0, Math.min(shownEntries.length - 1, index + step))]!;
+    setSelected(next.name);
+    document.getElementById(`file-${encodeURIComponent(next.name)}`)?.focus();
+  };
 
   return (
-    <section className="file-panel" aria-label="Files">
+    <section
+      className={`file-panel${expanded ? " file-panel--expanded" : ""}`}
+      aria-label="Files"
+      onDragEnter={(event) => {
+        if (event.dataTransfer.types.includes("Files")) setDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragging(false);
+        const file = event.dataTransfer.files[0];
+        if (file && !busy) void upload(file, false);
+      }}
+      onKeyDown={(event) => {
+        if (
+          (event.key === "Backspace" || (event.altKey && event.key === "ArrowUp")) &&
+          !["INPUT", "TEXTAREA"].includes((event.target as HTMLElement).tagName)
+        ) {
+          event.preventDefault();
+          if (!atRoot) void browse(remoteParent(path));
+        }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          if ((event.target as HTMLElement).closest(".file-panel__table")) {
+            event.preventDefault();
+            moveSelection(event.key === "ArrowDown" ? 1 : -1);
+          }
+        }
+      }}
+    >
+      {dragging && <div className="file-panel__drop">Drop file to upload</div>}
       <header className="file-panel__header">
         <h2>Files</h2>
+        <button
+          type="button"
+          onClick={onExpand}
+          aria-label={expanded ? "Collapse files" : "Expand files"}
+        >
+          {expanded ? <Minimize2 /> : <Maximize2 />}
+        </button>
         <button
           type="button"
           onClick={() => (busy ? setConfirmClose(true) : onClose())}
@@ -308,48 +400,102 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
           </button>
         </div>
       )}
-      <p className="file-panel__location">
-        Current folder: <span>{path === "." ? "Home folder" : displayName(path)}</span>
-      </p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void browse(pathInput);
-        }}
-      >
-        <label htmlFor={pathId}>Remote path</label>
-        <div className="file-panel__path">
-          <button
-            type="button"
-            aria-label="Up to parent folder"
-            disabled={!files || loading || !!busy || atRoot}
-            onClick={() => void browse(remoteParent(path))}
-          >
-            Up
-          </button>
+      <nav className="file-panel__breadcrumbs" aria-label="Current folder">
+        {breadcrumbs(path).map((crumb, index) =>
+          crumb.path ? (
+            <button
+              key={crumb.path}
+              type="button"
+              disabled={!!busy || loading}
+              onClick={() => void browse(crumb.path)}
+              aria-current={index === breadcrumbs(path).length - 1 ? "page" : undefined}
+            >
+              {displayName(crumb.label)}
+            </button>
+          ) : (
+            <details key="ellipsis">
+              <summary aria-label="More path folders">…</summary>
+              <div>
+                {path
+                  .split("/")
+                  .filter(Boolean)
+                  .slice(2, -1)
+                  .map((part, partIndex) => (
+                    <button
+                      key={partIndex}
+                      type="button"
+                      onClick={() =>
+                        void browse(
+                          `/${path
+                            .split("/")
+                            .filter(Boolean)
+                            .slice(0, partIndex + 3)
+                            .join("/")}`,
+                        )
+                      }
+                    >
+                      {displayName(part)}
+                    </button>
+                  ))}
+              </div>
+            </details>
+          ),
+        )}
+      </nav>
+      <div className="file-panel__toolbar">
+        <button
+          type="button"
+          aria-label="Up to parent folder"
+          disabled={!files || loading || !!busy || atRoot}
+          onClick={() => void browse(remoteParent(path))}
+        >
+          <ArrowUp /> Up
+        </button>
+        <button
+          type="button"
+          aria-label="Refresh files"
+          disabled={!files || loading || !!busy}
+          onClick={() => void browse(path)}
+        >
+          <RefreshCw /> Refresh
+        </button>
+        <label className="file-panel__upload">
+          <Upload /> Upload
           <input
-            id={pathId}
-            value={pathInput}
-            onChange={(event) => setPathInput(event.target.value)}
+            type="file"
+            aria-label="Upload file"
+            disabled={!files || !!busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void upload(file, false);
+            }}
           />
-          <button type="submit" disabled={!files || loading || !!busy}>
-            Open
-          </button>
-        </div>
-      </form>
-      <label className="file-panel__upload">
-        Upload file
-        <input
-          type="file"
-          aria-label="Upload file"
-          disabled={!files || !!busy}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) void upload(file, false);
+        </label>
+        <button type="button" aria-expanded={pathOpen} onClick={() => setPathOpen(!pathOpen)}>
+          Go to path
+        </button>
+      </div>
+      {pathOpen && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void browse(pathInput);
           }}
-        />
-      </label>
+        >
+          <label htmlFor={pathId}>Remote path</label>
+          <div className="file-panel__path">
+            <input
+              id={pathId}
+              value={pathInput}
+              onChange={(event) => setPathInput(event.target.value)}
+            />
+            <button type="submit" disabled={!files || loading || !!busy}>
+              Open
+            </button>
+          </div>
+        </form>
+      )}
       {pendingReplace && (
         <div className="file-panel__confirm" role="alertdialog" aria-label="Replace file">
           <p>
@@ -369,50 +515,117 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
           </button>
         </div>
       )}
-      {loading && <p role="status">Loading files...</p>}
+      {busy && (
+        <p role="status">
+          {busy.kind === "upload" ? "Uploading" : "Downloading"} {busy.name}: {busy.percent}%{" "}
+          <button
+            type="button"
+            onClick={() => {
+              cancelled.current = true;
+              files?.cancel();
+            }}
+          >
+            Cancel
+          </button>
+        </p>
+      )}
+      {loading && (
+        <div className="file-panel__skeleton" role="status" aria-label="Loading files">
+          <span>Loading files...</span>
+          {[0, 1, 2, 3, 4].map((item) => (
+            <div key={item} />
+          ))}
+        </div>
+      )}
       {!loading && entries.length === 0 && !failure && (
         <p>No files in this directory. Choose another path or upload a file.</p>
       )}
       {!loading && truncated && <p>Showing the first 10,000 items in this folder.</p>}
       {!loading && entries.length > 0 && (
-        <ul className="file-panel__list">
-          {entries.map((entry) => (
-            <li key={entry.name}>
-              {entry.kind === "folder" ? (
-                <button
-                  type="button"
-                  disabled={!!busy}
-                  onClick={() => void browse(remoteJoin(path, entry.name))}
-                >
-                  {displayName(entry.name)}/
-                </button>
-              ) : (
-                <span>{displayName(entry.name)}</span>
-              )}
-              <span>{describeEntry(entry)}</span>
-              {entry.kind === "file" && (
-                <button
-                  type="button"
-                  disabled={!!busy}
-                  aria-label={`Download file ${displayName(entry.name)}`}
-                  onClick={() => void download(entry)}
-                >
-                  Download file
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <div className="file-panel__table-wrap">
+          <table className="file-panel__table">
+            <thead>
+              <tr>
+                {(["name", "size", "mtime", "mode"] as const).map((column) => (
+                  <th
+                    key={column}
+                    scope="col"
+                    aria-sort={
+                      sort.column === column
+                        ? sort.direction === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                  >
+                    <button type="button" onClick={() => chooseSort(column)}>
+                      {
+                        { name: "Name", size: "Size", mtime: "Modified", mode: "Permissions" }[
+                          column
+                        ]
+                      }
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {shownEntries.map((entry) => {
+                const Icon = fileIcon(entry);
+                return (
+                  <tr
+                    key={entry.name}
+                    id={`file-${encodeURIComponent(entry.name)}`}
+                    tabIndex={
+                      selected === entry.name || (!selected && entry === shownEntries[0]) ? 0 : -1
+                    }
+                    aria-selected={selected === entry.name}
+                    onClick={() => setSelected(entry.name)}
+                    onDoubleClick={() => {
+                      if (entry.kind === "folder") void browse(remoteJoin(path, entry.name));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        setSelected(entry.name);
+                        if (entry.kind === "folder") void browse(remoteJoin(path, entry.name));
+                      }
+                    }}
+                  >
+                    <td>
+                      <span className="file-panel__name">
+                        <Icon aria-hidden="true" />
+                        <span>
+                          {displayName(entry.name)}
+                          {entry.kind === "folder" ? "/" : ""}
+                        </span>
+                        {entry.kind === "file" && (
+                          <button
+                            className="file-panel__download"
+                            type="button"
+                            disabled={!!busy}
+                            aria-label={`Download file ${displayName(entry.name)}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void download(entry);
+                            }}
+                          >
+                            <Download aria-hidden="true" />
+                          </button>
+                        )}
+                      </span>
+                      <span className="visually-hidden">{describeEntry(entry)}</span>
+                    </td>
+                    <td>{entry.kind === "folder" ? "" : formatBytes(entry.size)}</td>
+                    <td>{entry.mtime ? new Date(entry.mtime).toLocaleString() : ""}</td>
+                    <td>{entry.mode}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
-      {busy && (
-        <p role="status">
-          {busy.kind === "upload" ? "Uploading" : "Downloading"} {busy.name}: {busy.percent}%{" "}
-          <button type="button" onClick={() => files?.cancel()}>
-            Cancel
-          </button>
-        </p>
-      )}
-      {notice && <p role="status">{notice}</p>}
       {downloadLink && (
         <a href={downloadLink.url} download={downloadLink.name}>
           Save download
@@ -422,6 +635,19 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
         <div className="connection-error" role="alert">
           <p>{describeSftpFailure(failure.raw, failure.path, failure.name).message}</p>
           <LearnMore topic="files" />
+          <button
+            type="button"
+            onClick={() => {
+              if (files) void browse(pathInput);
+              else {
+                setLoading(true);
+                setFailure(null);
+                setRetryOpen((count) => count + 1);
+              }
+            }}
+          >
+            Retry
+          </button>
           <details>
             <summary>Technical details</summary>
             <code>{failure.raw}</code>

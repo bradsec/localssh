@@ -68,11 +68,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     label: "Files",
     heading: "Browse and transfer files",
     paragraphs: [
-      "Select Files in a connected terminal tab to browse that server. The panel shows the current folder. Enter a Remote path, open a folder or a link to a folder, or select Up for the parent folder. Each tab has its own file panel and SSH connection.",
-      "Select Upload file to choose one file from your device. If that name already exists on the server, localssh asks before replacing it. The new file keeps the old file's permissions, but not its owner or access lists, and a link at that name is replaced rather than followed. Select Download file beside a remote file to save it on your device.",
+      "Select Files in a connected terminal tab to browse that server. Use the path breadcrumbs, double-click a folder, select Up, or choose Go to path to enter a remote path. Select a column heading to sort; folders stay first. Arrow keys move the selected row, Enter opens a selected folder, and Backspace or Alt+Up goes to its parent. Expand gives Files the full desktop session area while the terminal stays connected. Each tab keeps its own Files view.",
+      "Select Upload to choose one file from your device, or drop a file onto Files. If that name already exists on the server, localssh asks before replacing it. The new file keeps the old file's permissions, but not its owner or access lists, and a link at that name is replaced rather than followed. Select Download beside a remote file to save it on your device. Transfer results appear as notifications above the panel.",
       "Cancel stops the current transfer. Closing Files leaves the terminal connected, and asks first while a transfer runs. Disconnecting closes both. A cancelled upload before replacement keeps the previous remote file and removes its hidden .localssh-upload- copy. If the server supports atomic rename, a failed replacement also keeps the previous remote file. Without it, the previous file can be lost and the upload kept as a hidden copy. If the connection drops first, that copy is removed when its folder is listed again after 24 hours.",
       "Downloads use browser file storage when available. Your browser may ask where to save the file or offer a Share or Save to Files action. Save download stays available for 10 minutes, or until the next transfer or Close files. If browser storage is unavailable, downloads are limited to 16 MiB.",
       "Names with control or text-direction characters show those characters as <U+XXXX>, so a name cannot disguise its real extension.",
+      "A folder with more than 10,000 items shows a persistent note and a notification. Only the first 10,000 items appear. Modified dates use your device's local time.",
     ],
   },
   {

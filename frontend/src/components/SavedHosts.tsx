@@ -5,6 +5,7 @@ import { PasswordStrength } from "./PasswordStrength.js";
 import { SavedHostEditor } from "./SavedHostEditor.js";
 import type { VaultApi } from "../vault/useVault.js";
 import type { EntryInput, SavedEntry } from "../vault/vaultEngine.js";
+import { useToast } from "./Toasts.js";
 
 export interface SavedHostsProps {
   vault: VaultApi;
@@ -16,6 +17,7 @@ export interface SavedHostsProps {
 const RESET_PHRASE = "DELETE";
 
 export function SavedHosts({ vault, current, disabled = false, onPick }: SavedHostsProps) {
+  const toast = useToast();
   // Storage is blocked, so there is nothing this card could offer.
   if (vault.status === "unavailable") return null;
 
@@ -37,7 +39,9 @@ export function SavedHosts({ vault, current, disabled = false, onPick }: SavedHo
               className="saved-hosts__lock"
               type="button"
               disabled={vault.busy}
-              onClick={() => void vault.lock()}
+              onClick={async () => {
+                if (await vault.lock()) toast("Address book locked.", "info");
+              }}
             >
               <LockKeyhole size={16} />
               Lock
@@ -62,6 +66,7 @@ export function SavedHosts({ vault, current, disabled = false, onPick }: SavedHo
 }
 
 function SetupForm({ vault }: { vault: VaultApi }) {
+  const toast = useToast();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [mismatch, setMismatch] = useState(false);
@@ -76,7 +81,7 @@ function SetupForm({ vault }: { vault: VaultApi }) {
     // Paint the pending state before the derivation, which blocks the page's
     // only thread for as long as Argon2id runs.
     await nextFrame();
-    await vault.create(password);
+    if (await vault.create(password)) toast("Address book created.", "success");
   }
 
   return (
@@ -120,6 +125,7 @@ function SetupForm({ vault }: { vault: VaultApi }) {
 }
 
 function UnlockForm({ vault }: { vault: VaultApi }) {
+  const toast = useToast();
   const [password, setPassword] = useState("");
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [phrase, setPhrase] = useState("");
@@ -127,7 +133,10 @@ function UnlockForm({ vault }: { vault: VaultApi }) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     await nextFrame();
-    if (await vault.unlock(password)) setPassword("");
+    if (await vault.unlock(password)) {
+      setPassword("");
+      toast("Address book unlocked.", "success");
+    }
   }
 
   return (
@@ -199,6 +208,7 @@ function UnlockForm({ vault }: { vault: VaultApi }) {
 }
 
 function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps) {
+  const toast = useToast();
   const [editing, setEditing] = useState<SavedEntry | null | undefined>(undefined);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SavedEntry | null>(null);
@@ -245,7 +255,10 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
   }
 
   async function handleSave(input: EntryInput) {
-    if (await vault.save(input)) setEditing(undefined);
+    if (await vault.save(input)) {
+      toast(`Saved host ${input.nickname} ${editing === null ? "added" : "updated"}.`, "success");
+      setEditing(undefined);
+    }
   }
 
   if (editing !== undefined) {
@@ -354,7 +367,10 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
               className="button button--danger"
               type="button"
               onClick={async () => {
-                if (await vault.remove(deleting.id)) closeDeleteDialog();
+                if (await vault.remove(deleting.id)) {
+                  toast(`Saved host ${deleting.nickname} deleted.`, "success");
+                  closeDeleteDialog();
+                }
               }}
             >
               Delete {deleting.nickname}
@@ -375,6 +391,7 @@ function EntryList({ vault, current, disabled = false, onPick }: SavedHostsProps
 }
 
 function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -390,6 +407,7 @@ function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
     setMismatch(false);
     await nextFrame();
     if (await vault.changePassword(current, next)) {
+      toast("Master password changed.", "success");
       setOpen(false);
       setCurrent("");
       setNext("");

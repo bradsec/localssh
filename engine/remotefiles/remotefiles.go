@@ -65,10 +65,12 @@ var maxListEntries = 10000
 
 // Entry is one name in a directory listing.
 type Entry struct {
-	Name   string
-	Kind   Kind
-	IsLink bool
-	Size   int64
+	Name    string
+	Kind    Kind
+	IsLink  bool
+	Size    int64
+	ModTime int64
+	Mode    string
 }
 
 // List reads dir, resolves symbolic links for display, and removes this
@@ -96,13 +98,14 @@ func List(c *sftp.Client, dir string, now time.Time) (string, []Entry, bool, err
 		if isStaleTemp(info, now) && c.Remove(full) == nil {
 			continue
 		}
-		entry := Entry{Name: info.Name(), Kind: kindOf(info.Mode()), Size: info.Size()}
+		entry := Entry{Name: info.Name(), Kind: kindOf(info.Mode()), Size: info.Size(), ModTime: info.ModTime().UnixMilli(), Mode: info.Mode().Perm().String()[1:]}
 		if info.Mode()&os.ModeSymlink != 0 {
 			entry.IsLink = true
 			if target, err := c.Stat(full); err != nil {
 				entry.Kind, entry.Size = Broken, 0
 			} else {
 				entry.Kind, entry.Size = kindOf(target.Mode()), target.Size()
+				entry.ModTime, entry.Mode = target.ModTime().UnixMilli(), target.Mode().Perm().String()[1:]
 			}
 		}
 		entries = append(entries, entry)

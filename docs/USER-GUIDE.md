@@ -38,12 +38,25 @@ disconnects all sessions. Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch
 tabs with a hardware keyboard.
 
 Select **Files** in a connected tab to browse that server over SFTP. Below 1024px
-wide, Files, Disconnect, and Clipboard are under **Actions** in the toolbar. Enter a
-**Remote path**, open a folder or link to a folder, or select **Up**. Choose
-**Upload file** to send one file. localssh asks before replacing an existing
-name. Choose **Download file** beside a remote file to save it. **Cancel** stops
-the current transfer; **Close files** leaves the terminal connected and asks
-first when a transfer is running.
+wide, Files, Disconnect, and Clipboard are under **Actions** in the toolbar.
+Use a breadcrumb to open an earlier folder, **Up** to open its parent, or
+**Go to path** to enter a **Remote path**. Use **Refresh** to reload the folder.
+Select a column heading to sort by name, size, modified time, or permissions;
+folders stay first. Select a row with one click or Enter, and open a folder
+with a double-click or Enter. Arrow keys move the selection. Backspace or
+Alt+Up opens the parent. Below 720px, the list shows name and size only.
+
+Choose **Upload** or drop a local file onto Files. localssh asks before
+replacing an existing name. Choose the download action on a remote file to save
+it. **Cancel** stops the current transfer; **Close files** leaves the terminal
+connected and asks first when a transfer is running. On desktop, **Expand**
+gives Files the full session area without ending the terminal session. Each
+tab keeps its own expanded state until that tab closes.
+
+Transfer results and other short outcomes appear near the top of the screen.
+Hover or focus a notification to pause its timer, or choose **Dismiss** to
+close it. A folder with more than 10,000 entries keeps a notice above the
+list; Files shows the first 10,000.
 
 Downloads use browser file storage when available. The fallback without that
 storage has a 16 MiB limit. On iPhone or iPad, use the browser's download,

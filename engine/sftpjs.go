@@ -178,7 +178,7 @@ func (f *sftpBridge) value() js.Value {
 			}
 			items := make([]any, 0, len(entries))
 			for _, entry := range entries {
-				items = append(items, map[string]any{"name": entry.Name, "kind": string(entry.Kind), "isLink": entry.IsLink, "size": float64(entry.Size)})
+				items = append(items, map[string]any{"name": entry.Name, "kind": string(entry.Kind), "isLink": entry.IsLink, "size": float64(entry.Size), "mtime": float64(entry.ModTime), "mode": entry.Mode})
 			}
 			return map[string]any{"path": resolved, "entries": items, "truncated": truncated}, nil
 		})

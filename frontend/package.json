@@ -12,6 +12,7 @@
     "prebuild": "node scripts/copy-engine.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "format": "oxfmt src e2e scripts playwright *.ts",
     "format:check": "oxfmt --check src e2e scripts playwright *.ts",
     "test": "vitest run --exclude \"e2e/**\"",
     "test:e2e": "playwright test",
