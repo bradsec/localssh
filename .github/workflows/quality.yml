@@ -4,20 +4,95 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
+# github.workflow is the caller's name under workflow_call, so a Release run
+# does not cancel, or get cancelled by, the Quality run for the same push.
 concurrency:
-  group: quality-${{ github.ref }}
+  group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  engine:
+    name: Engine
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - name: Check engine
+        working-directory: engine
+        run: |
+          go vet ./...
+          GOOS=js GOARCH=wasm go vet ./...
+          go test -race ./...
+          ./build.sh
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+          GOOS=js GOARCH=wasm "$(go env GOPATH)/bin/govulncheck" ./...
+
+  relay:
+    name: Relay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - name: Check relay
+        working-directory: relay
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm test
+          npm run lint
+          npm run format:check
+          npm run build
+
+  frontend-unit:
+    name: Frontend unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Check frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm test
+          npm run lint
+          npm run format:check
+          npx tsc -b
+          npm run build
+
+  e2e:
+    name: Browser tests (${{ matrix.shardIndex }}/${{ matrix.shardTotal }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shardIndex: [1, 2]
+        shardTotal: [2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Go is required here, not only an engine artifact: the Playwright
+      # webServer command runs ../engine/build.sh itself before serving.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
@@ -29,41 +104,66 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             relay/package-lock.json
-      - name: Check engine
-        working-directory: engine
+      # Global setup runs the local relay with relay's tsx, and E2E_COMBINED
+      # builds the relay, so both packages need their dependencies.
+      - name: Install dependencies
         run: |
-          go vet ./...
-          GOOS=js GOARCH=wasm go vet ./...
-          go test -race ./...
-          ./build.sh
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-          "$(go env GOPATH)/bin/govulncheck" ./...
-          GOOS=js GOARCH=wasm "$(go env GOPATH)/bin/govulncheck" ./...
-      - name: Check relay
-        working-directory: relay
-        run: |
-          npm ci
-          npm audit --audit-level=high
-          npm test
-          npm run lint
-          npm run format:check
-          npm run build
-      - name: Check frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm audit --audit-level=high
-          npm test
-          npm run lint
-          npm run format:check
-          npx tsc -b
-          npm run build
+          npm ci --prefix relay
+          npm ci --prefix frontend
+      # Browser binaries are not cached: Playwright's CI guide notes restore
+      # time is comparable to download time and OS deps are not cacheable.
       - name: Install browser
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Browser tests
         working-directory: frontend
-        run: E2E_COMBINED=1 npm run test:e2e
+        run: E2E_COMBINED=1 npx playwright test --reporter=blob --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: blob-report-${{ matrix.shardIndex }}
+          path: frontend/blob-report
+          retention-days: 1
+
+  e2e-report:
+    name: Browser test report
+    if: ${{ !cancelled() }}
+    needs: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Download blob reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: frontend/all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+      - name: Merge into HTML report
+        working-directory: frontend
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+      - name: Upload HTML report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report-attempt-${{ github.run_attempt }}
+          path: frontend/playwright-report
+          retention-days: 14
+
+  image-smoke:
+    name: Combined image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build combined image
         run: docker build -f Dockerfile.all-in-one -t localssh:smoke .
       - name: Smoke combined image

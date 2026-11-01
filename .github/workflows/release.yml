@@ -61,87 +61,42 @@ jobs:
   test:
     name: Test
     needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
     permissions:
       contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: engine/go.mod
-          cache-dependency-path: engine/go.sum
-
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            frontend/package-lock.json
-            relay/package-lock.json
-
-      - name: Test engine
-        working-directory: engine
-        run: |
-          go test ./...
-          go test -race ./...
-          GOOS=js GOARCH=wasm go vet ./...
-          ./build.sh
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-          "$(go env GOPATH)/bin/govulncheck" ./...
-          GOOS=js GOARCH=wasm "$(go env GOPATH)/bin/govulncheck" ./...
-
-      - name: Test relay
-        working-directory: relay
-        run: |
-          npm ci
-          npm audit --audit-level=high
-          npm test
-          npm run lint
-          npm run format:check
-          npm run build
-
-      - name: Test frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm audit --audit-level=high
-          npm test
-          npm run lint
-          npm run format:check
-          npx tsc -b
-          npm run build
-
-      - name: Install browser
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-
-      - name: Browser tests
-        working-directory: frontend
-        run: E2E_COMBINED=1 npm run test:e2e
+    uses: ./.github/workflows/quality.yml
 
   publish:
-    name: Publish release
+    name: Publish ${{ matrix.name }}
     needs:
       - validate
       - test
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
       packages: write
       attestations: write
       id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: frontend
+            repository: localssh-frontend
+            context: .
+            file: Dockerfile
+          - name: relay
+            repository: localssh-relay
+            context: relay
+            file: relay/Dockerfile
+          - name: combined
+            repository: localssh
+            context: .
+            file: Dockerfile.all-in-one
     env:
-      FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/localssh-frontend
-      RELAY_IMAGE: ghcr.io/${{ github.repository_owner }}/localssh-relay
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.repository }}
       COMBINED_IMAGE: ghcr.io/${{ github.repository_owner }}/localssh
       VERSION: ${{ needs.validate.outputs.version }}
-      TAG: ${{ needs.validate.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,6 +114,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # All three images carry the labels generated for the combined image,
+      # as they did when one job built them in sequence.
       - name: Image metadata
         id: metadata
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -166,78 +123,90 @@ jobs:
           images: ${{ env.COMBINED_IMAGE }}
           tags: type=raw,value=${{ env.VERSION }}
 
-      - name: Build and publish frontend
-        id: frontend
+      - name: Build and publish ${{ matrix.name }}
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             VERSION=${{ env.VERSION }}
           tags: |
-            ${{ env.FRONTEND_IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:${{ env.VERSION }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-      - name: Attest frontend image
+      - name: Attest ${{ matrix.name }} image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ env.FRONTEND_IMAGE }}
-          subject-digest: ${{ steps.frontend.outputs.digest }}
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      - name: Build and publish relay
-        id: relay
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: relay
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            VERSION=${{ env.VERSION }}
-          tags: |
-            ${{ env.RELAY_IMAGE }}:${{ env.VERSION }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha,scope=relay
-          cache-to: type=gha,mode=max,scope=relay
+      - name: Record digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p digests
+          printf '%s\n' "$DIGEST" > "digests/${{ matrix.name }}"
 
-      - name: Attest relay image
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      - name: Upload digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          subject-name: ${{ env.RELAY_IMAGE }}
-          subject-digest: ${{ steps.relay.outputs.digest }}
-          push-to-registry: true
+          name: digest-${{ matrix.name }}
+          path: digests/${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Build and publish combined image
-        id: combined
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+  release:
+    name: Promote and release
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+    env:
+      FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/localssh-frontend
+      RELAY_IMAGE: ghcr.io/${{ github.repository_owner }}/localssh-relay
+      COMBINED_IMAGE: ghcr.io/${{ github.repository_owner }}/localssh
+      VERSION: ${{ needs.validate.outputs.version }}
+      TAG: ${{ needs.validate.outputs.tag }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          context: .
-          file: Dockerfile.all-in-one
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            VERSION=${{ env.VERSION }}
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha,scope=combined
-          cache-to: type=gha,mode=max,scope=combined
+          path: digests
+          pattern: digest-*
+          merge-multiple: true
 
-      - name: Attest combined image
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
-          subject-name: ${{ env.COMBINED_IMAGE }}
-          subject-digest: ${{ steps.combined.outputs.digest }}
-          push-to-registry: true
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Promote images to latest
-        env:
-          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
-          RELAY_DIGEST: ${{ steps.relay.outputs.digest }}
-          COMBINED_DIGEST: ${{ steps.combined.outputs.digest }}
         run: |
+          set -euo pipefail
+          digest_pattern='^sha256:[0-9a-f]{64}$'
+          for name in frontend relay combined; do
+            digest="$(tr -d '\n' < "digests/$name")"
+            if [[ ! "$digest" =~ $digest_pattern ]]; then
+              echo "Invalid digest for $name: $digest" >&2
+              exit 1
+            fi
+            declare "${name^^}_DIGEST=$digest"
+          done
           docker buildx imagetools create --tag "$FRONTEND_IMAGE:latest" "$FRONTEND_IMAGE@$FRONTEND_DIGEST"
           docker buildx imagetools create --tag "$RELAY_IMAGE:latest" "$RELAY_IMAGE@$RELAY_DIGEST"
           docker buildx imagetools create --tag "$COMBINED_IMAGE:latest" "$COMBINED_IMAGE@$COMBINED_DIGEST"
@@ -247,6 +216,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "$VERSION" \
             --generate-notes
