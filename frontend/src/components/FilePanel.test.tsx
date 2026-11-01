@@ -134,6 +134,24 @@ it("cancels an upload and shows an informational toast", async () => {
 });
 
 describe("browsing", () => {
+  it("keeps a typed path when the initial listing finishes", async () => {
+    let finishInitial!: (value: RemoteListing) => void;
+    const initial = new Promise<RemoteListing>((resolve) => {
+      finishInitial = resolve;
+    });
+    const files = makeFiles({
+      list: vi.fn().mockReturnValueOnce(initial).mockResolvedValueOnce(listing("/huge")),
+    });
+    const { user } = renderPanel(files);
+    await user.click(screen.getByRole("button", { name: "Go to path" }));
+    fireEvent.change(screen.getByLabelText("Remote path"), { target: { value: "/huge" } });
+    finishInitial(listing("/"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Open$/ })).toBeEnabled());
+    expect(screen.getByLabelText("Remote path")).toHaveValue("/huge");
+    await user.click(screen.getByRole("button", { name: /^Open$/ }));
+    expect(files.list).toHaveBeenLastCalledWith("/huge");
+  });
+
   it("sorts by size while folders remain first", async () => {
     const files = makeFiles({
       list: vi.fn().mockResolvedValue(

@@ -181,7 +181,7 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
 /** Creates count empty files in a new folder under the served SFTP root. */
 function makeFolder(name: string, count: number) {
   const folder = path.join(process.env.E2E_SFTP_ROOT!, name);
-  mkdirSync(folder);
+  mkdirSync(folder, { recursive: true });
   for (let index = 0; index < count; index++)
     writeFileSync(path.join(folder, `file-${String(index).padStart(5, "0")}.txt`), "");
 }
@@ -253,6 +253,8 @@ test("filters and keyboard-scrolls a 2,000-file folder inside the panel", async 
 
 test("lists the first 10,000 items of a larger folder and reaches the end", async ({ page }) => {
   test.setTimeout(60_000);
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   makeFolder("huge", 10_050);
   await page.setViewportSize({ width: 1440, height: 900 });
   const files = await openFilesAt(page, "/huge");

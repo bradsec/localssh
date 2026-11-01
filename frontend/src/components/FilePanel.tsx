@@ -257,7 +257,7 @@ export function FilePanel({
           setTruncated(!!listing.truncated);
           if (listing.truncated) toast("Showing the first 10,000 items in this folder.", "warning");
           setPath(listing.path);
-          setPathInput(listing.path);
+          setPathInput((current) => (current === "." ? listing.path : current));
         } catch (error) {
           if (!disposed) setFailure({ raw: String(error), path: ".", name: "files" });
         } finally {
