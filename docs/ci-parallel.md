@@ -11,8 +11,8 @@ The single `test` job is now six jobs. `quality.yml` also accepts `workflow_call
 | Job | Runs |
 | --- | --- |
 | `engine` | go vet (native and wasm), `go test -race`, `./build.sh`, govulncheck (native and wasm) |
-| `relay` | npm ci, audit, test, lint, format check, build |
-| `frontend-unit` | npm ci, audit, test, lint, format check, `tsc -b`, build |
+| `relay` | Go setup, engine build, npm ci, audit, test, lint, format check, build |
+| `frontend-unit` | Go setup, engine build, npm ci, audit, test, lint, format check, `tsc -b`, build |
 | `e2e` (matrix, shards 1/2 and 2/2) | Go and Node setup, `npm ci` in relay and frontend, Chromium install, `E2E_COMBINED=1 npx playwright test --reporter=blob --shard=N/2`, blob report upload |
 | `e2e-report` | runs when the workflow is not cancelled, after both shards; merges the blobs with `playwright merge-reports --reporter html` and uploads one `playwright-report-attempt-N` artifact (14 days) |
 | `image-smoke` | builds `Dockerfile.all-in-one`, runs the container, waits for the healthcheck, curls `/healthz` |
@@ -65,7 +65,13 @@ These are estimates built from the measured step times of 2026-11-01. They are n
 - Quality, 2m44s before. The longest jobs are `engine` (about 8s setup-go + 51s checks, so about 1m) and `e2e` plus `e2e-report`. The e2e path is about 8s setup-go + 5s setup-node + about 8s npm ci + 18s browser install + about 12 to 15s for the larger shard, then about 20s to merge. That is about 1m15s. Estimated critical path: about 1m15s to 1m40s.
 - Release, about 13m55s before (9s validate + 3m13s Test + 10m33s Publish). New path: 9s validate + about 1m30s test + the slowest image leg + about 20s promote and release. Per-image times were not measured. If the combined image is about 40 to 50% of the 10m33s, its leg takes about 4m30s to 5m30s. Estimated critical path: about 6m30s to 7m30s.
 
-## Not verified
+## Not verified in the initial report
 
-- No live GitHub Actions run of either workflow yet. Things only a live run can confirm: artifact upload and download across jobs, the reusable workflow call, per-leg GHA cache scopes, and the digest hand-off to `release`.
+- The initial report had no live GitHub Actions run. Run `41270936211` later confirmed Quality's artifact upload and report merge. The reusable workflow call, per-leg GHA cache scopes, and digest hand-off to `release` remain unverified.
 - Release timings depend on how long each image takes under QEMU, which was not measured.
+
+## First live Quality run
+
+Run `41270936211` exposed two missing build prerequisites in the split jobs. The frontend build's `prebuild` script copies `engine.wasm` and `wasm_exec.js` from `engine/dist`, but `frontend-unit` had no engine build. The relay spike calls `engine/build.sh` inside its 15-second test timeout, so cold Go downloads and compilation exhausted that timeout. Both jobs now set up Go and run `engine/build.sh` before their npm checks. The relay test still builds the engine itself when run standalone; the CI build primes Go's cache before the timed test.
+
+The browser shard failed a focus assertion before the test clicked the terminal. Its error context showed a connected terminal with an enabled input that was not focused. `selectTab` could request focus before the terminal controls registered or before React showed the panel. The app now applies pending focus after the panel commits or the controls register, unless focus has moved elsewhere. The test still checks automatic focus before clicking the terminal. The uploaded blob contained no trace for this failure.
