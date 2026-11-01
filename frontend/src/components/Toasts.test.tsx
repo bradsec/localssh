@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ToastProvider, useToast } from "./Toasts.js";
+import { ToastProvider } from "./Toasts.js";
+import { useToast } from "../toast.js";
 
 let show!: ReturnType<typeof useToast>;
 

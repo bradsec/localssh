@@ -184,7 +184,7 @@ describe("browsing", () => {
         .mockResolvedValueOnce(listing("/srv/beta")),
     });
     const { user } = renderPanel(files);
-    const first = (await screen.findByText("alpha/")).closest("tr")!;
+    const first = (await screen.findByText("alpha/")).closest("td")!;
     first.focus();
     await user.keyboard("{ArrowDown}");
     const second = screen.getByText("beta/").closest("tr")!;
@@ -379,6 +379,116 @@ describe("closing", () => {
     const files = makeFiles({ list: vi.fn().mockReturnValue(undefined) });
     renderPanel(files);
     expect(await screen.findByText(/Files is no longer connected/)).toBeVisible();
+  });
+});
+
+function manyFiles(count: number): RemoteFile[] {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `file-${String(index).padStart(4, "0")}.txt`,
+    kind: "file" as const,
+    isLink: false,
+    size: index,
+    mtime: 0,
+    mode: "rw-r--r--",
+  }));
+}
+
+describe("large folders", () => {
+  it("filters entries by name as you type and shows a live count", async () => {
+    const entries = [
+      ...manyFiles(1998),
+      { name: "Report.PDF", kind: "file" as const, isLink: false, size: 1, mtime: 0, mode: "" },
+      { name: "reports", kind: "folder" as const, isLink: false, size: 0, mtime: 0, mode: "" },
+    ];
+    const files = makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", entries)) });
+    const { user } = renderPanel(files);
+    await screen.findByText("reports/");
+    const count = screen.getByText("2,000 items");
+    expect(count).toHaveAttribute("role", "status");
+    expect(count).toHaveAttribute("aria-live", "polite");
+    await user.type(screen.getByRole("searchbox", { name: "Filter files" }), "REPORT");
+    expect(count).toHaveTextContent("2 of 2,000 items");
+    expect(
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.textContent),
+    ).toEqual([expect.stringContaining("reports/"), expect.stringContaining("Report.PDF")]);
+    await user.type(screen.getByRole("searchbox", { name: "Filter files" }), "zzz");
+    expect(count).toHaveTextContent("0 of 2,000 items");
+    expect(screen.getByText("No items match this filter.")).toBeVisible();
+  });
+
+  it("restores the list and the selection when the filter is cleared", async () => {
+    const files = makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", manyFiles(50))) });
+    const { user } = renderPanel(files);
+    await user.click(await screen.findByText("file-0003.txt"));
+    const filter = screen.getByRole("searchbox", { name: "Filter files" });
+    await user.type(filter, "0042");
+    expect(screen.queryByText("file-0003.txt")).toBeNull();
+    await user.clear(filter);
+    expect(screen.getByText("50 items")).toBeVisible();
+    expect(screen.getByText("file-0003.txt").closest("tr")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("renders only visible rows and keeps keyboard selection working to the last item", async () => {
+    const files = makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", manyFiles(2000))) });
+    const { user } = renderPanel(files);
+    const firstCell = (await screen.findByText("file-0000.txt")).closest("td")!;
+    const grid = screen.getByRole("grid", { name: "Files in /srv" });
+    expect(grid).toHaveAttribute("aria-rowcount", "2001");
+    expect(screen.getAllByRole("row").length).toBeLessThan(60);
+    firstCell.focus();
+    await user.keyboard("{End}");
+    const last = screen.getByText("file-1999.txt").closest("tr")!;
+    expect(last).toHaveAttribute("aria-selected", "true");
+    expect(last).toHaveAttribute("aria-rowindex", "2001");
+    expect(last.querySelector("td")).toHaveFocus();
+    expect(screen.getAllByRole("row").length).toBeLessThan(60);
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByText("file-1998.txt").closest("tr")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.keyboard("{Home}");
+    expect(screen.getByText("file-0000.txt").closest("tr")).toHaveAttribute("aria-rowindex", "2");
+    await user.keyboard("{PageDown}");
+    const paged = screen
+      .getAllByRole("row")
+      .find((row) => row.getAttribute("aria-selected") === "true")!;
+    expect(Number(paged.getAttribute("aria-rowindex"))).toBeGreaterThan(3);
+    expect(paged.querySelector("td")).toHaveFocus();
+    await user.keyboard("{PageUp}");
+    expect(screen.getByText("file-0000.txt").closest("tr")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("uses 32px rows for a fine pointer and 44px rows for a coarse pointer", async () => {
+    const files = makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", manyFiles(3))) });
+    const { unmount } = renderPanel(files);
+    const row = (await screen.findByText("file-0000.txt")).closest("tr")!;
+    expect(row.style.height).toBe("32px");
+    expect(screen.getByRole("region", { name: "Files" }).style.getPropertyValue("--file-row")).toBe(
+      "32px",
+    );
+    unmount();
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(pointer: coarse)",
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      renderPanel(files);
+      expect((await screen.findByText("file-0000.txt")).closest("tr")!.style.height).toBe("44px");
+    } finally {
+      Reflect.deleteProperty(window, "matchMedia");
+    }
   });
 });
 

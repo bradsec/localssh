@@ -45,7 +45,7 @@
 
 ## Components
 
-- All buttons, inputs, selects, summaries, tab controls, and key controls have at least 44 by 44 CSS px hit regions. Keep persistent labels and visible 3px focus outlines with 2px offset. Icon-only controls require accessible names.
+- All buttons, inputs, selects, summaries, tab controls, and key controls have at least 44 by 44 CSS px hit regions. Exception: Files panel rows and panel toolbar controls are 32px tall under fine pointers (mouse, trackpad) for density, still above the WCAG 2.2 SC 2.5.8 24px minimum, and return to 44px under `(pointer: coarse)`. Keep persistent labels and visible 3px focus outlines with 2px offset. Icon-only controls require accessible names.
 - Primary button: one per task region. Default accent fill; hover accent darkens in light mode or lightens in dark; active no positional shift; focus outlined; disabled shows text plus disabled affordance; loading uses current action text and reserves width.
 - Secondary button: surface fill, control border, text. Destructive button: danger fill or border only at a destructive decision. Menus and dialogs restore focus to their trigger.
 - Inputs: surface fill and control border; hover strengthens border; focus uses accent outline; invalid state shows text and danger border; disabled state stays readable. Do not use placeholder as label.

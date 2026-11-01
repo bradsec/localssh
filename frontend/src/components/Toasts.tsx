@@ -1,18 +1,10 @@
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { ToastContext, type ShowToast, type ToastType } from "../toast.js";
 
-export type ToastType = "success" | "info" | "warning" | "error";
 type Toast = { id: number; message: string; type: ToastType; leaving: boolean };
-type ShowToast = (message: string, type?: ToastType) => void;
-
-const noopToast: ShowToast = () => {};
-const ToastContext = createContext<ShowToast>(noopToast);
 const icons = { success: CircleCheck, info: Info, warning: TriangleAlert, error: CircleAlert };
-
-export function useToast(): ShowToast {
-  return useContext(ToastContext);
-}
 
 function ToastCard({
   toast,

@@ -43,8 +43,17 @@ Use a breadcrumb to open an earlier folder, **Up** to open its parent, or
 **Go to path** to enter a **Remote path**. Use **Refresh** to reload the folder.
 Select a column heading to sort by name, size, modified time, or permissions;
 folders stay first. Select a row with one click or Enter, and open a folder
-with a double-click or Enter. Arrow keys move the selection. Backspace or
-Alt+Up opens the parent. Below 720px, the list shows name and size only.
+with a double-click or Enter. Arrow keys move the selection; Home and End jump
+to the first and last item, and Page Up and Page Down move a screen at a time.
+Backspace or Alt+Up opens the parent. Below 720px, the list shows name and size only.
+
+Type in **Filter files** to show only names that contain the text, ignoring
+case. The count beside the filter, for example `12 of 2,000 items`, updates as
+you type. Clear the filter to see the whole folder again with the same item
+selected. Filtering resets when you open another folder. The breadcrumbs,
+toolbar, filter, and column headings stay put; only the list scrolls. Rows are
+32px with a mouse or trackpad and 44px on touch screens, so a long folder
+shows more items at once on desktop.
 
 Choose **Upload** or drop a local file onto Files. localssh asks before
 replacing an existing name. Choose the download action on a remote file to save

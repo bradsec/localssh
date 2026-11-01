@@ -29,7 +29,8 @@ import { loadTerminalFont } from "./terminalFonts.js";
 import { DEFAULT_THEME_NAME, TERMINAL_THEMES } from "./terminalThemes.js";
 import { trackViewportHeight } from "./viewportHeight.js";
 import { useVault } from "./vault/useVault.js";
-import { ToastProvider, useToast } from "./components/Toasts.js";
+import { ToastProvider } from "./components/Toasts.js";
+import { useToast } from "./toast.js";
 
 const RELAY_WS_URL = resolveRelayWsUrl(import.meta.env.VITE_RELAY_WS_URL, window.location);
 const ENCODER = new TextEncoder();

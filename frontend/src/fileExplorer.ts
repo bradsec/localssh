@@ -8,6 +8,7 @@ import {
   Folder,
   Link,
 } from "lucide-react";
+import { displayName } from "./remoteFiles.js";
 import type { RemoteFile } from "./ssh/engine.js";
 
 export type SortColumn = "name" | "size" | "mtime" | "mode";
@@ -44,6 +45,13 @@ export function sortEntries(entries: RemoteFile[], column: SortColumn, direction
           : a[column] - b[column];
     return (direction === "asc" ? value : -value) || a.name.localeCompare(b.name);
   });
+}
+
+/** Keeps entries whose shown name contains the query, ignoring case. */
+export function filterEntries(entries: RemoteFile[], query: string): RemoteFile[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return entries;
+  return entries.filter((entry) => displayName(entry.name).toLocaleLowerCase().includes(needle));
 }
 
 export function breadcrumbs(path: string) {

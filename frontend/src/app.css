@@ -638,15 +638,21 @@ body:has(.app-shell--connect) {
   display: none;
 }
 
+/* Files is a compact explorer: on a fine pointer rows and panel controls are
+   32px, which keeps a long folder scannable beside the terminal and stays above
+   the 24px WCAG 2.5.8 minimum. A coarse pointer keeps the 44px target. The row
+   height itself comes from FilePanel as --file-row, because the list
+   virtualization needs the same number. */
 .file-panel {
+  --file-control: 32px;
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
   min-height: 0;
-  padding: var(--space-4) max(var(--space-4), env(safe-area-inset-right))
-    max(var(--space-4), env(safe-area-inset-bottom)) var(--space-4);
+  padding: var(--space-3) max(var(--space-3), env(safe-area-inset-right))
+    max(var(--space-3), env(safe-area-inset-bottom)) var(--space-3);
   overflow: auto;
   overscroll-behavior: contain;
   border-left: 1px solid var(--border);
@@ -654,16 +660,23 @@ body:has(.app-shell--connect) {
   background: var(--surface);
 }
 
+@media (pointer: coarse) {
+  .file-panel {
+    --file-control: var(--target);
+  }
+}
+
 .file-panel__breadcrumbs,
 .file-panel__toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   flex-wrap: wrap;
 }
 
 .file-panel__breadcrumbs {
   font-family: var(--mono);
+  font-size: var(--text-secondary);
 }
 .file-panel__breadcrumbs button {
   border: 0;
@@ -672,6 +685,13 @@ body:has(.app-shell--connect) {
 }
 .file-panel__breadcrumbs details {
   position: relative;
+}
+.file-panel__breadcrumbs summary {
+  display: grid;
+  place-items: center;
+  min-width: var(--file-control);
+  min-height: var(--file-control);
+  cursor: pointer;
 }
 .file-panel__breadcrumbs details > div {
   position: absolute;
@@ -688,12 +708,17 @@ body:has(.app-shell--connect) {
   align-items: center;
   gap: var(--space-1);
 }
+.file-panel__toolbar svg {
+  width: 16px;
+  height: 16px;
+}
 .file-panel__upload {
   position: relative;
-  min-height: var(--target);
-  padding: 0 var(--space-3);
+  min-height: var(--file-control);
+  padding: 0 var(--space-2);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
+  font-weight: 500;
   cursor: pointer;
 }
 .file-panel__upload input {
@@ -702,71 +727,142 @@ body:has(.app-shell--connect) {
   opacity: 0;
   cursor: pointer;
 }
-.file-panel__table-wrap {
-  min-height: 0;
-  overflow: auto;
-  border: 1px solid var(--border);
+.file-panel__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
-.file-panel__table {
+.file-panel__filter label {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 28rem;
+}
+.file-panel__filter svg {
+  position: absolute;
+  top: 50%;
+  left: var(--space-2);
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.file-panel__filter input {
   width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
+  min-height: var(--file-control);
+  padding: 0 var(--space-2) 0 var(--space-6);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--text-input);
+}
+.file-panel__filter input:hover {
+  border-color: var(--text-muted);
+}
+.file-panel__filter input:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.file-panel .file-panel__filter p {
+  flex: none;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The grid keeps its header and lets only the body scroll, inside the panel.
+   Only the rows near the scroll position exist in the DOM; they are placed
+   absolutely at index x row height, which is what gives the body its full
+   scroll height. */
+.file-panel__table {
+  --file-columns: minmax(0, 1fr) 76px;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(var(--file-row) * 4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
   font-size: var(--text-secondary);
 }
-.file-panel__table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+.file-panel--expanded .file-panel__table {
+  --file-columns: minmax(0, 4fr) minmax(0, 1.5fr) minmax(0, 2.5fr) minmax(0, 2fr);
+}
+.file-panel__table thead,
+.file-panel__table tbody {
+  display: block;
+  scrollbar-gutter: stable;
+}
+.file-panel__table thead {
+  flex: none;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
   background: var(--surface-subtle);
+}
+.file-panel__table tbody {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.file-panel__table tr {
+  display: grid;
+  grid-template-columns: var(--file-columns);
+  align-items: center;
+}
+.file-panel__table tbody tr {
+  position: absolute;
+  right: 0;
+  left: 0;
+  border-bottom: 1px solid var(--border);
+}
+.file-panel__table th,
+.file-panel__table td {
+  display: block;
+  min-width: 0;
   text-align: left;
 }
 .file-panel__table th button {
-  min-height: var(--target);
   width: 100%;
+  min-height: var(--file-control);
   padding: 0 var(--space-2);
   border: 0;
+  border-radius: 0;
   background: transparent;
   text-align: left;
 }
-.file-panel__table th:first-child {
-  width: 40%;
-}
-.file-panel__table th:nth-child(2) {
-  width: 15%;
-}
-.file-panel__table th:nth-child(3) {
-  width: 25%;
-}
-.file-panel__table th:nth-child(4) {
-  width: 20%;
-}
-.file-panel:not(.file-panel--expanded) .file-panel__table th:nth-child(3),
-.file-panel:not(.file-panel--expanded) .file-panel__table th:nth-child(4),
-.file-panel:not(.file-panel--expanded) .file-panel__table td:nth-child(3),
-.file-panel:not(.file-panel--expanded) .file-panel__table td:nth-child(4) {
+.file-panel:not(.file-panel--expanded) .file-panel__table th:nth-child(n + 3),
+.file-panel:not(.file-panel--expanded) .file-panel__table td:nth-child(n + 3) {
   display: none;
 }
-.file-panel:not(.file-panel--expanded) .file-panel__table th:first-child {
-  width: auto;
-}
-.file-panel:not(.file-panel--expanded) .file-panel__table th:nth-child(2) {
-  width: 76px;
-}
 .file-panel__table td {
-  height: var(--target);
   padding: 0 var(--space-2);
-  border-top: 1px solid var(--border);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.file-panel__table td:first-child {
+  padding-right: 0;
+}
 .file-panel__table td:nth-child(2) {
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+.file-panel__table td:focus {
+  outline: none;
+}
+@media (hover: hover) {
+  .file-panel__table tbody tr:hover {
+    background: color-mix(in srgb, var(--surface-subtle) 60%, transparent);
+  }
 }
 .file-panel__table tr[aria-selected="true"] {
   background: var(--surface-subtle);
 }
-.file-panel__table tr:focus-visible {
+.file-panel__table tr:has(> td:focus-visible) {
   outline: 3px solid var(--accent);
   outline-offset: -3px;
 }
@@ -778,6 +874,8 @@ body:has(.app-shell--connect) {
 }
 .file-panel__name svg {
   flex: none;
+  width: 16px;
+  height: 16px;
   color: var(--accent);
 }
 .file-panel__name span {
@@ -788,23 +886,27 @@ body:has(.app-shell--connect) {
   display: grid;
   place-items: center;
   flex: none;
-  width: var(--target);
-  min-height: var(--target);
+  width: var(--file-row);
+  min-height: 0;
+  height: calc(var(--file-row) - 1px);
   margin-left: auto;
   padding: 0;
   border: 0;
+  border-radius: 0;
+  background: transparent;
   visibility: hidden;
 }
 .file-panel__table tr:hover .file-panel__download,
-.file-panel__table tr:focus-within .file-panel__download {
+.file-panel__table tr:focus-within .file-panel__download,
+.file-panel__table tr[aria-selected="true"] .file-panel__download {
   visibility: visible;
 }
 .file-panel__skeleton {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 .file-panel__skeleton div {
-  height: var(--target);
+  height: var(--file-row);
   background: var(--surface-subtle);
   border-radius: var(--radius-control);
 }
@@ -828,17 +930,12 @@ body:has(.app-shell--connect) {
   .file-panel .file-panel__download {
     visibility: visible;
   }
-  .file-panel__table th:nth-child(3),
-  .file-panel__table th:nth-child(4),
-  .file-panel__table td:nth-child(3),
-  .file-panel__table td:nth-child(4) {
+  .file-panel--expanded .file-panel__table {
+    --file-columns: minmax(0, 1fr) 72px;
+  }
+  .file-panel__table th:nth-child(n + 3),
+  .file-panel__table td:nth-child(n + 3) {
     display: none;
-  }
-  .file-panel__table th:first-child {
-    width: auto;
-  }
-  .file-panel__table th:nth-child(2) {
-    width: 72px;
   }
 }
 
@@ -847,16 +944,26 @@ body:has(.app-shell--connect) {
   margin: 0;
 }
 
+/* The list takes the height the fixed chrome leaves. */
+.file-panel > .file-panel__table {
+  flex: 1 1 auto;
+}
+
 .file-panel__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-1);
+}
+
+.file-panel__header h2 {
+  margin: 0 auto 0 0;
+  font-size: var(--text-section);
+  line-height: 24px;
 }
 
 .file-panel button {
-  min-height: var(--target);
-  padding: 0 var(--space-3);
+  min-height: var(--file-control);
+  padding: 0 var(--space-2);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
   color: var(--text);

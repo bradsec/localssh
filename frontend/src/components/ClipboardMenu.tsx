@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Clipboard } from "lucide-react";
 import { LearnMore } from "./Help.js";
 import { readClipboardText, writeClipboardText } from "../clipboard.js";
-import { useToast } from "./Toasts.js";
+import { useToast } from "../toast.js";
 
 export interface ClipboardMenuProps {
   /** Whether the terminal currently holds a selection that can be copied. */

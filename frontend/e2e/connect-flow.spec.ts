@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 for (const viewport of [
   { width: 320, height: 700 },
@@ -175,6 +175,96 @@ test("uploads and downloads a file through the relay", async ({ page }) => {
   await page.keyboard.type("terminal-still-open");
   await page.keyboard.press("Enter");
   await expect(page.locator(".xterm-rows")).toContainText("terminal-still-open");
+});
+
+/** Creates count empty files in a new folder under the served SFTP root. */
+function makeFolder(name: string, count: number) {
+  const folder = path.join(process.env.E2E_SFTP_ROOT!, name);
+  mkdirSync(folder);
+  for (let index = 0; index < count; index++)
+    writeFileSync(path.join(folder, `file-${String(index).padStart(5, "0")}.txt`), "");
+}
+
+async function openFilesAt(page: Page, folder: string) {
+  const address = process.env.E2E_SSHD_ADDR!;
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+  await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Password$/i).fill("s3cret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("button", { name: "Go to path" }).click();
+  await page.getByLabel("Remote path").fill(folder);
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await page.getByRole("button", { name: "Go to path" }).click();
+  return page.getByRole("region", { name: "Files" });
+}
+
+// These folders live under the shared SFTP root, so they are made here, after
+// the upload test above has checked the root starts empty.
+test("filters and keyboard-scrolls a 2,000-file folder inside the panel", async ({ page }) => {
+  makeFolder("many", 2000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const files = await openFilesAt(page, "/many");
+  const count = files.getByRole("status").filter({ hasText: "items" });
+  await expect(count).toHaveText("2,000 items");
+  const grid = files.getByRole("grid", { name: "Files in /many" });
+  await expect(grid).toHaveAttribute("aria-rowcount", "2001");
+  expect(await grid.getByRole("row").count()).toBeLessThan(60);
+
+  const filter = files.getByRole("searchbox", { name: "Filter files" });
+  await filter.fill("FILE-0019");
+  await expect(count).toHaveText("10 of 2,000 items");
+  await expect(grid.getByRole("row")).toHaveCount(11);
+  await filter.fill("");
+  await expect(count).toHaveText("2,000 items");
+
+  const body = grid.locator("tbody");
+  const pageScroll = () => page.evaluate(() => document.scrollingElement!.scrollTop);
+  await grid.getByText("file-00000.txt").click();
+  await page.keyboard.press("End");
+  const last = grid.getByRole("row", { name: /file-01999\.txt/ });
+  await expect(last).toHaveAttribute("aria-selected", "true");
+  await expect(last).toHaveAttribute("aria-rowindex", "2001");
+  await expect(last.getByRole("gridcell").first()).toBeFocused();
+  await expect(last).toBeInViewport();
+  expect(await body.evaluate((element) => element.scrollTop)).toBeGreaterThan(50_000);
+  expect(await pageScroll()).toBe(0);
+  expect(await grid.getByRole("row").count()).toBeLessThan(60);
+
+  await page.keyboard.press("PageUp");
+  await expect(grid.getByRole("row", { selected: true })).not.toHaveAttribute(
+    "aria-rowindex",
+    "2001",
+  );
+  await body.hover();
+  await page.mouse.wheel(0, 5000);
+  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(55_000);
+  await page.mouse.wheel(0, 5000);
+  expect(await pageScroll()).toBe(0);
+  await page.keyboard.press("Home");
+  await expect(grid.getByRole("row", { name: /file-00000\.txt/ })).toBeInViewport();
+  expect(await body.evaluate((element) => element.scrollTop)).toBe(0);
+  expect(await pageScroll()).toBe(0);
+});
+
+test("lists the first 10,000 items of a larger folder and reaches the end", async ({ page }) => {
+  test.setTimeout(60_000);
+  makeFolder("huge", 10_050);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const files = await openFilesAt(page, "/huge");
+  const note = "Showing the first 10,000 items in this folder.";
+  await expect(files.getByText(note)).toBeVisible();
+  await expect(page.locator(".toast").getByText(note)).toBeVisible();
+  await expect(files.getByRole("status").filter({ hasText: "items" })).toHaveText("10,000 items");
+  const grid = files.getByRole("grid");
+  await grid.getByRole("gridcell").first().focus();
+  await page.keyboard.press("End");
+  await expect(grid.getByRole("row", { selected: true })).toHaveAttribute("aria-rowindex", "10001");
+  expect(await grid.getByRole("row").count()).toBeLessThan(60);
+  expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0);
 });
 
 test("keeps two live terminal sessions and closes only the selected one", async ({ page }) => {

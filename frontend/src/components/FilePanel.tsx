@@ -1,5 +1,13 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { ArrowUp, Download, Maximize2, Minimize2, RefreshCw, Upload } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { ArrowUp, Download, Maximize2, Minimize2, RefreshCw, Search, Upload } from "lucide-react";
 import { describeSftpFailure } from "../connectionErrors.js";
 import {
   openFiles,
@@ -16,11 +24,13 @@ import {
   originDirectory,
   sweepDownloads,
 } from "../remoteFiles.js";
+import type { CSSProperties } from "react";
 import { LearnMore } from "./Help.js";
-import { useToast } from "./Toasts.js";
+import { useToast } from "../toast.js";
 import {
   breadcrumbs,
   fileIcon,
+  filterEntries,
   formatBytes,
   sortEntries,
   type SortColumn,
@@ -28,6 +38,31 @@ import {
 } from "../fileExplorer.js";
 
 const FALLBACK_LIMIT = 16 * 1024 * 1024;
+
+/* The list renders only the rows in view plus this many on each side, so a
+   10,000-entry folder keeps a few dozen rows in the DOM. */
+const OVERSCAN = 8;
+/* Used until the list has a measured height, and where layout reports none. */
+const FALLBACK_VIEWPORT = 480;
+const COARSE_POINTER = "(pointer: coarse)";
+
+function subscribePointer(onChange: () => void) {
+  const query = window.matchMedia?.(COARSE_POINTER);
+  query?.addEventListener?.("change", onChange);
+  return () => query?.removeEventListener?.("change", onChange);
+}
+
+function coarsePointer() {
+  return window.matchMedia?.(COARSE_POINTER).matches ?? false;
+}
+
+function rowId(name: string) {
+  return `file-${encodeURIComponent(name)}`;
+}
+
+function itemCount(count: number) {
+  return `${count.toLocaleString()} ${count === 1 ? "item" : "items"}`;
+}
 
 function remoteJoin(directory: string, name: string): string {
   if (directory === ".") return name;
@@ -180,6 +215,14 @@ export function FilePanel({
   const [selected, setSelected] = useState<string | null>(null);
   const [pathOpen, setPathOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewport, setViewport] = useState(FALLBACK_VIEWPORT);
+  const list = useRef<HTMLTableSectionElement>(null);
+  const pendingFocus = useRef<string | null>(null);
+  // Rows are a fixed height so the window of rendered rows follows from the
+  // scroll offset alone; touch screens keep the 44px target.
+  const rowHeight = useSyncExternalStore(subscribePointer, coarsePointer) ? 44 : 32;
   const cancelled = useRef(false);
   const [downloadLink, setDownloadLink] = useState<{ url: string; name: string } | null>(null);
   const [failure, setFailure] = useState<{ raw: string; path: string; name: string } | null>(null);
@@ -233,15 +276,44 @@ export function FilePanel({
     };
   }, [handle, toast, retryOpen]);
 
+  function showListing(next: RemoteFile[], wasTruncated: boolean) {
+    setEntries(next);
+    setTruncated(wasTruncated);
+    if (wasTruncated) toast("Showing the first 10,000 items in this folder.", "warning");
+  }
+
+  function scrollListTo(top: number) {
+    if (list.current) list.current.scrollTop = top;
+    setScrollTop(top);
+  }
+
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    const measure = () => setViewport(element.clientHeight || FALLBACK_VIEWPORT);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [loading, entries.length]);
+
+  useLayoutEffect(() => {
+    const name = pendingFocus.current;
+    if (name === null) return;
+    pendingFocus.current = null;
+    document.getElementById(rowId(name))?.querySelector<HTMLElement>('[role="gridcell"]')?.focus();
+  });
+
   const browse = async (next: string) => {
     if (!files || !next.trim()) return;
     setLoading(true);
     setFailure(null);
     try {
       const listing = await files.list(next.trim());
-      setEntries(listing.entries);
-      setTruncated(!!listing.truncated);
-      if (listing.truncated) toast("Showing the first 10,000 items in this folder.", "warning");
+      showListing(listing.entries, !!listing.truncated);
+      setFilter("");
+      scrollListTo(0);
       setPath(listing.path);
       setPathInput(listing.path);
       setSelected(null);
@@ -271,9 +343,7 @@ export function FilePanel({
         setBusy({ kind: "upload", name: shown, percent }),
       );
       const refreshed = await files.list(path);
-      setEntries(refreshed.entries);
-      setTruncated(!!refreshed.truncated);
-      if (refreshed.truncated) toast("Showing the first 10,000 items in this folder.", "warning");
+      showListing(refreshed.entries, !!refreshed.truncated);
       toast(`Uploaded ${shown}.`, "success");
     } catch (error) {
       if (!overwrite && String(error).includes(REMOTE_FILE_EXISTS)) setPendingReplace(file);
@@ -318,25 +388,76 @@ export function FilePanel({
   };
 
   const atRoot = path === "/";
-  const shownEntries = sortEntries(entries, sort.column, sort.direction);
+  const sortedEntries = useMemo(
+    () => sortEntries(entries, sort.column, sort.direction),
+    [entries, sort.column, sort.direction],
+  );
+  const shownEntries = useMemo(() => filterEntries(sortedEntries, filter), [sortedEntries, filter]);
+  const selectedIndex =
+    selected === null ? -1 : shownEntries.findIndex((entry) => entry.name === selected);
+  // The roving tab stop: the selected row, or the first row when the
+  // selection is unset or filtered out.
+  const activeIndex = Math.max(0, selectedIndex);
+  const pageRows = Math.max(1, Math.floor(viewport / rowHeight) - 1);
+  const firstRendered = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN);
+  const lastRendered = Math.min(
+    shownEntries.length - 1,
+    Math.ceil((scrollTop + viewport) / rowHeight) + OVERSCAN,
+  );
+  const renderedIndexes: number[] = [];
+  // The tab stop stays in the DOM when scrolled away, so Tab still reaches the list.
+  if (activeIndex < firstRendered && activeIndex < shownEntries.length)
+    renderedIndexes.push(activeIndex);
+  for (let index = firstRendered; index <= lastRendered; index++) renderedIndexes.push(index);
+  if (activeIndex > lastRendered && activeIndex < shownEntries.length)
+    renderedIndexes.push(activeIndex);
+
   const chooseSort = (column: SortColumn) =>
     setSort((current) => ({
       column,
       direction: current.column === column && current.direction === "asc" ? "desc" : "asc",
     }));
-  const moveSelection = (step: number) => {
+  const revealRow = (index: number) => {
+    const top = index * rowHeight;
+    if (top < scrollTop) scrollListTo(top);
+    else if (top + rowHeight > scrollTop + viewport)
+      scrollListTo(Math.max(0, top + rowHeight - viewport));
+  };
+  const selectRow = (index: number) => {
     if (!shownEntries.length) return;
-    const index =
-      selected === null ? 0 : shownEntries.findIndex((entry) => entry.name === selected);
-    const next = shownEntries[Math.max(0, Math.min(shownEntries.length - 1, index + step))]!;
+    const clamped = Math.max(0, Math.min(shownEntries.length - 1, index));
+    const next = shownEntries[clamped]!;
     setSelected(next.name);
-    document.getElementById(`file-${encodeURIComponent(next.name)}`)?.focus();
+    pendingFocus.current = next.name;
+    revealRow(clamped);
+  };
+  const changeFilter = (value: string) => {
+    setFilter(value);
+    const index =
+      selected === null
+        ? -1
+        : filterEntries(sortedEntries, value).findIndex((entry) => entry.name === selected);
+    if (index < 0) scrollListTo(0);
+    else {
+      const top = index * rowHeight;
+      if (top < scrollTop || top + rowHeight > scrollTop + viewport)
+        scrollListTo(Math.max(0, top - Math.floor(viewport / 2)));
+    }
+  };
+  const listKeys: Record<string, (current: number) => number> = {
+    ArrowDown: (current) => current + 1,
+    ArrowUp: (current) => current - 1,
+    PageDown: (current) => current + pageRows,
+    PageUp: (current) => current - pageRows,
+    Home: () => 0,
+    End: () => shownEntries.length - 1,
   };
 
   return (
     <section
       className={`file-panel${expanded ? " file-panel--expanded" : ""}`}
       aria-label="Files"
+      style={{ "--file-row": `${rowHeight}px` } as CSSProperties}
       onDragEnter={(event) => {
         if (event.dataTransfer.types.includes("Files")) setDragging(true);
       }}
@@ -359,12 +480,6 @@ export function FilePanel({
         ) {
           event.preventDefault();
           if (!atRoot) void browse(remoteParent(path));
-        }
-        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-          if ((event.target as HTMLElement).closest(".file-panel__table")) {
-            event.preventDefault();
-            moveSelection(event.key === "ArrowDown" ? 1 : -1);
-          }
         }
       }}
     >
@@ -542,89 +657,131 @@ export function FilePanel({
       )}
       {!loading && truncated && <p>Showing the first 10,000 items in this folder.</p>}
       {!loading && entries.length > 0 && (
-        <div className="file-panel__table-wrap">
-          <table className="file-panel__table">
-            <thead>
-              <tr>
-                {(["name", "size", "mtime", "mode"] as const).map((column) => (
-                  <th
-                    key={column}
-                    scope="col"
-                    aria-sort={
-                      sort.column === column
-                        ? sort.direction === "asc"
-                          ? "ascending"
-                          : "descending"
-                        : undefined
-                    }
-                  >
-                    <button type="button" onClick={() => chooseSort(column)}>
-                      {
-                        { name: "Name", size: "Size", mtime: "Modified", mode: "Permissions" }[
-                          column
-                        ]
-                      }
-                    </button>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {shownEntries.map((entry) => {
-                const Icon = fileIcon(entry);
-                return (
-                  <tr
-                    key={entry.name}
-                    id={`file-${encodeURIComponent(entry.name)}`}
-                    tabIndex={
-                      selected === entry.name || (!selected && entry === shownEntries[0]) ? 0 : -1
-                    }
-                    aria-selected={selected === entry.name}
-                    onClick={() => setSelected(entry.name)}
-                    onDoubleClick={() => {
-                      if (entry.kind === "folder") void browse(remoteJoin(path, entry.name));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        setSelected(entry.name);
-                        if (entry.kind === "folder") void browse(remoteJoin(path, entry.name));
-                      }
-                    }}
-                  >
-                    <td>
-                      <span className="file-panel__name">
-                        <Icon aria-hidden="true" />
-                        <span>
-                          {displayName(entry.name)}
-                          {entry.kind === "folder" ? "/" : ""}
-                        </span>
-                        {entry.kind === "file" && (
-                          <button
-                            className="file-panel__download"
-                            type="button"
-                            disabled={!!busy}
-                            aria-label={`Download file ${displayName(entry.name)}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void download(entry);
-                            }}
-                          >
-                            <Download aria-hidden="true" />
-                          </button>
-                        )}
-                      </span>
-                      <span className="visually-hidden">{describeEntry(entry)}</span>
-                    </td>
-                    <td>{entry.kind === "folder" ? "" : formatBytes(entry.size)}</td>
-                    <td>{entry.mtime ? new Date(entry.mtime).toLocaleString() : ""}</td>
-                    <td>{entry.mode}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="file-panel__filter">
+          <label>
+            <Search aria-hidden="true" />
+            <span className="visually-hidden">Filter files</span>
+            <input
+              type="search"
+              placeholder="Filter files"
+              autoComplete="off"
+              spellCheck={false}
+              value={filter}
+              onChange={(event) => changeFilter(event.target.value)}
+            />
+          </label>
+          <p role="status" aria-live="polite">
+            {filter.trim()
+              ? `${shownEntries.length.toLocaleString()} of ${itemCount(entries.length)}`
+              : itemCount(entries.length)}
+          </p>
         </div>
+      )}
+      {!loading && entries.length > 0 && shownEntries.length === 0 && (
+        <p>No items match this filter.</p>
+      )}
+      {!loading && entries.length > 0 && (
+        <table
+          className="file-panel__table"
+          role="grid"
+          aria-label={`Files in ${displayName(path)}`}
+          aria-rowcount={shownEntries.length + 1}
+          style={{ display: shownEntries.length ? undefined : "none" }}
+        >
+          <thead role="rowgroup">
+            <tr role="row" aria-rowindex={1}>
+              {(["name", "size", "mtime", "mode"] as const).map((column) => (
+                <th
+                  key={column}
+                  role="columnheader"
+                  scope="col"
+                  aria-sort={
+                    sort.column === column
+                      ? sort.direction === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined
+                  }
+                >
+                  <button type="button" onClick={() => chooseSort(column)}>
+                    {{ name: "Name", size: "Size", mtime: "Modified", mode: "Permissions" }[column]}
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody
+            ref={list}
+            role="rowgroup"
+            onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+            onKeyDown={(event) => {
+              const target = event.target as HTMLElement;
+              const move = listKeys[event.key];
+              if (move && !event.altKey) {
+                event.preventDefault();
+                selectRow(move(activeIndex));
+                return;
+              }
+              if (event.key === "Enter" && target.getAttribute("role") === "gridcell") {
+                const entry = shownEntries[activeIndex];
+                if (!entry) return;
+                event.preventDefault();
+                setSelected(entry.name);
+                if (entry.kind === "folder") void browse(remoteJoin(path, entry.name));
+              }
+            }}
+          >
+            {renderedIndexes.map((index) => {
+              const entry = shownEntries[index]!;
+              const Icon = fileIcon(entry);
+              return (
+                <tr
+                  key={entry.name}
+                  id={rowId(entry.name)}
+                  role="row"
+                  aria-rowindex={index + 2}
+                  aria-selected={selected === entry.name}
+                  style={{ top: index * rowHeight, height: rowHeight }}
+                  onClick={() => setSelected(entry.name)}
+                  onDoubleClick={() => {
+                    if (entry.kind === "folder") void browse(remoteJoin(path, entry.name));
+                  }}
+                >
+                  <td role="gridcell" tabIndex={index === activeIndex ? 0 : -1}>
+                    <span className="file-panel__name">
+                      <Icon aria-hidden="true" />
+                      <span>
+                        {displayName(entry.name)}
+                        {entry.kind === "folder" ? "/" : ""}
+                      </span>
+                      {entry.kind === "file" && (
+                        <button
+                          className="file-panel__download"
+                          type="button"
+                          tabIndex={index === activeIndex ? 0 : -1}
+                          disabled={!!busy}
+                          aria-label={`Download file ${displayName(entry.name)}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void download(entry);
+                          }}
+                        >
+                          <Download aria-hidden="true" />
+                        </button>
+                      )}
+                    </span>
+                    <span className="visually-hidden">{describeEntry(entry)}</span>
+                  </td>
+                  <td role="gridcell">{entry.kind === "folder" ? "" : formatBytes(entry.size)}</td>
+                  <td role="gridcell">
+                    {entry.mtime ? new Date(entry.mtime).toLocaleString() : ""}
+                  </td>
+                  <td role="gridcell">{entry.mode}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
       {downloadLink && (
         <a href={downloadLink.url} download={downloadLink.name}>

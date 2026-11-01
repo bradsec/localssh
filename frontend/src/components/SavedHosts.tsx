@@ -5,7 +5,7 @@ import { PasswordStrength } from "./PasswordStrength.js";
 import { SavedHostEditor } from "./SavedHostEditor.js";
 import type { VaultApi } from "../vault/useVault.js";
 import type { EntryInput, SavedEntry } from "../vault/vaultEngine.js";
-import { useToast } from "./Toasts.js";
+import { useToast } from "../toast.js";
 
 export interface SavedHostsProps {
   vault: VaultApi;

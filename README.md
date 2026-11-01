@@ -28,8 +28,10 @@ others discover the project.
   scrollback, automatic PTY resizing, and full-screen sessions.
 - **Multiple live terminals.** Open another server without closing current
   shells. Each tab has its own SSH session, output, and terminal size.
-- **SFTP files.** Browse remote directories with breadcrumbs, sortable file
-  details, and keyboard navigation. Upload by choosing or dropping a file,
+- **SFTP files.** Browse remote directories in a compact 360px side panel with
+  breadcrumbs, sortable file details, a name filter, and keyboard navigation.
+  In large folders only the list scrolls, and only the rows in view
+  are drawn. Upload by choosing or dropping a file,
   watch transfer progress, and download from each connected tab. Replacing an
   existing file requires confirmation. On desktop, expand Files to use the
   full session area while the terminal stays connected.
@@ -455,7 +457,13 @@ Select **Files** in a connected tab (under **Actions** below 1024px wide) to
 browse that server. Breadcrumbs open earlier folders; **Go to path** opens the
 **Remote path** field. Double-click a folder, including a link to a folder,
 or select **Up** for its parent. Columns sort by name, size, modified time,
-or permissions. Choose **Upload** or drop a file onto Files. If the name already
+or permissions. Type in **Filter files** to narrow the folder by name,
+ignoring case; the count beside it reads, for example, `12 of 2,000 items`, and
+clearing it restores the list and selection. The folder path, toolbar, filter,
+and column headings stay in place while the list scrolls inside the panel.
+Rows are 32px with a mouse or trackpad and 44px on touch screens. Arrow keys,
+Home, End, Page Up, and Page Down move the selection; Enter opens a folder and
+Backspace or Alt+Up opens the parent. Choose **Upload** or drop a file onto Files. If the name already
 exists on the server, localssh asks before
 replacing it; the replacement keeps the old file's permissions but not its
 owner or access lists, and a link at that name is replaced, not followed.

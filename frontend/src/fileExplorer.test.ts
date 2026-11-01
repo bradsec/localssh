@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FileArchive, FileCode, FileImage, FileKey, FileText, Folder, Link } from "lucide-react";
-import { fileIcon, sortEntries, breadcrumbs, formatBytes } from "./fileExplorer.js";
+import { fileIcon, filterEntries, sortEntries, breadcrumbs, formatBytes } from "./fileExplorer.js";
 import type { RemoteFile } from "./ssh/engine.js";
 
 const entry = (name: string, kind: RemoteFile["kind"] = "file", size = 0): RemoteFile => ({
@@ -52,5 +52,14 @@ describe("file explorer", () => {
       { label: "…", path: "" },
       { label: "f", path: "/a/b/c/d/e/f" },
     ]);
+  });
+
+  it("filters by name without case and keeps every entry for a blank query", () => {
+    const entries = [entry("Notes.TXT"), entry("notes", "folder"), entry("other.log")];
+    expect(filterEntries(entries, "  NOTES ").map((item) => item.name)).toEqual([
+      "Notes.TXT",
+      "notes",
+    ]);
+    expect(filterEntries(entries, " ")).toBe(entries);
   });
 });
