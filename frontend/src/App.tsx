@@ -114,6 +114,7 @@ function AppContent() {
   const tabsRef = useRef<TerminalTab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const activeIdRef = useRef<number | null>(null);
+  const pendingFocusRef = useRef<number | null>(null);
   const nextTabIdRef = useRef(0);
   const [terminalSettings, setTerminalSettings] = useState(() => loadTerminalSettings());
   const [touchPointer] = useState(hasTouchPointer);
@@ -134,10 +135,19 @@ function AppContent() {
 
   const activeTab = tabs.find((tab) => tab.id === activeId) ?? null;
   const currentTab = () => tabsRef.current.find((tab) => tab.id === activeIdRef.current);
+  const focusPendingTerminal = (id: number) => {
+    if (pendingFocusRef.current !== id || activeIdRef.current !== id) return;
+    const panel = document.getElementById(`terminal-panel-${id}`);
+    const controls = tabsRef.current.find((tab) => tab.id === id)?.controls;
+    if (!panel || panel.hidden || !controls) return;
+    pendingFocusRef.current = null;
+    controls.focus();
+  };
   const selectTab = (id: number | null, focusTerminal = true) => {
     if (tabsRef.current.find((tab) => tab.id === id)?.connecting) id = null;
     currentTab()?.controls?.blur();
     activeIdRef.current = id;
+    pendingFocusRef.current = focusTerminal ? id : null;
     setActiveId(id);
     updateModifiers(NO_MODIFIERS);
     setTerminalFocused(false);
@@ -147,9 +157,21 @@ function AppContent() {
         document
           .querySelector<HTMLElement>(`[aria-controls="terminal-panel-${id}"]`)
           ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-        if (focusTerminal) tabsRef.current.find((tab) => tab.id === id)?.controls?.focus();
+        focusPendingTerminal(id);
       });
   };
+
+  useEffect(() => {
+    if (activeId !== null) focusPendingTerminal(activeId);
+  }, [activeId]);
+
+  useEffect(() => {
+    const cancelPendingFocus = () => {
+      pendingFocusRef.current = null;
+    };
+    document.addEventListener("focusin", cancelPendingFocus);
+    return () => document.removeEventListener("focusin", cancelPendingFocus);
+  }, []);
 
   useEffect(() => {
     const sessions = tabsRef;
@@ -612,6 +634,7 @@ function AppContent() {
                       tab.controls = controls;
                       for (const chunk of tab.pendingData) controls.write(chunk);
                       tab.pendingData = [];
+                      focusPendingTerminal(tab.id);
                     }}
                     onInput={(data) => {
                       if (activeIdRef.current === tab.id) sendInput(data);

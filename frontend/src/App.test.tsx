@@ -30,6 +30,8 @@ let terminalSelectionChange: ((hasSelection: boolean) => void) | undefined;
 const terminalPaste = vi.fn();
 const terminalWrites: ReturnType<typeof vi.fn>[] = [];
 let terminalSelectionText = "";
+let deferTerminalReady = false;
+let completeTerminalReady: (() => void) | undefined;
 
 vi.mock("./components/Terminal.js", () => ({
   Terminal: ({
@@ -62,7 +64,7 @@ vi.mock("./components/Terminal.js", () => ({
     terminalFocusChange = onFocusChange;
     terminalSelectionChange = onSelectionChange;
     onResize?.(48, 20);
-    onReady?.({
+    const controls = {
       write: write.current,
       reset: terminalReset,
       focus: terminalFocus,
@@ -70,7 +72,9 @@ vi.mock("./components/Terminal.js", () => ({
       applicationCursorMode: () => false,
       getSelection: () => terminalSelectionText,
       paste: terminalPaste,
-    });
+    };
+    if (deferTerminalReady) completeTerminalReady = () => onReady?.(controls);
+    else onReady?.(controls);
     return <div aria-label="SSH terminal emulator" />;
   },
 }));
@@ -138,8 +142,46 @@ describe("App", () => {
     terminalPaste.mockClear();
     terminalWrites.length = 0;
     terminalSelectionText = "";
+    deferTerminalReady = false;
+    completeTerminalReady = undefined;
     usePointer("fine");
     localStorage.clear();
+  });
+
+  it("focuses a selected terminal when its controls register later", async () => {
+    deferTerminalReady = true;
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    await connect(userEvent.setup(), "late.example");
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(terminalFocus).not.toHaveBeenCalled();
+
+    act(() => {
+      completeTerminalReady?.();
+      completeTerminalReady?.();
+    });
+    expect(terminalFocus).toHaveBeenCalledOnce();
+  });
+
+  it("does not take focus from another control when the terminal becomes ready", async () => {
+    deferTerminalReady = true;
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    await connect(userEvent.setup(), "late.example");
+    const filesButton = screen.getByRole("button", { name: "Files" });
+    act(() => filesButton.focus());
+
+    act(() => completeTerminalReady?.());
+    expect(filesButton).toHaveFocus();
+    expect(terminalFocus).not.toHaveBeenCalled();
   });
 
   it("keeps another SSH session open when a terminal tab closes", async () => {

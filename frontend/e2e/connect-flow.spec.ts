@@ -68,6 +68,7 @@ test("connects through the relay, trusts the host key, and echoes input", async 
   await expect(terminalInput).toBeFocused();
 
   await page.locator(".xterm-screen").click();
+  await expect(terminalInput).toBeFocused();
   await page.keyboard.type("hello");
   await page.keyboard.press("Enter");
 
