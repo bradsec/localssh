@@ -73,7 +73,11 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
     setCopied(ok);
     setBlocked(!ok);
     setManualCopy(ok ? "" : text);
-    setStatus(ok ? "" : "The browser blocked the copy. Select the text below and use your device's Copy action.");
+    setStatus(
+      ok
+        ? ""
+        : "The browser blocked the copy. Select the text below and use your device's Copy action.",
+    );
     toast(
       ok
         ? "Copied the selection."

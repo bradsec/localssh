@@ -125,7 +125,9 @@ it("cancels an upload and shows an informational toast", async () => {
   expect(files.cancel).toHaveBeenCalledOnce();
   rejectUpload("connection closed");
   expect(
-    await screen.findByText("Files is no longer connected. Close Files and select Files again, or reconnect the tab."),
+    await screen.findByText(
+      "Files is no longer connected. Close Files and select Files again, or reconnect the tab.",
+    ),
   ).toBeVisible();
   expect(document.querySelector(".toast--info")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Learn more about files" })).toBeNull();

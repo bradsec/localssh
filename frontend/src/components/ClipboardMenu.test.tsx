@@ -36,7 +36,11 @@ describe("ClipboardMenu", () => {
   it("copies the current selection and confirms it", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });
-    render(<ToastProvider><ClipboardMenu hasSelection getSelection={() => "line one"} onPaste={vi.fn()} /></ToastProvider>);
+    render(
+      <ToastProvider>
+        <ClipboardMenu hasSelection getSelection={() => "line one"} onPaste={vi.fn()} />
+      </ToastProvider>,
+    );
 
     await userEvent.click(screen.getByRole("button", { name: /^Clipboard/ }));
     await userEvent.click(screen.getByRole("button", { name: "Copy selection" }));
