@@ -1,0 +1,456 @@
+{
+  "host-key-changed-390-light": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-37 right=249",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-37 right=249"
+    ]
+  },
+  "vault-reset-390-light": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "select \"8 px9 px10 px11 px12 px13 px14 px15 px16\" left=-37 right=249",
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-37 right=249",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-37 right=249"
+    ]
+  },
+  "files-overwrite-390-light": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "files-stop-transfer-390-light": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "sockets-390-light": "3 sockets, 2 open",
+  "tabs-dropped-390-light": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "button \"New terminal\" left=355 right=489 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "host-key-changed-1440-light": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "vault-reset-1440-light": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "files-overwrite-1440-light": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "files-stop-transfer-1440-light": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "sockets-1440-light": "3 sockets, 2 open",
+  "tabs-dropped-1440-light": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "host-key-changed-390-dark": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-37 right=249",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-37 right=249"
+    ]
+  },
+  "vault-reset-390-dark": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "select \"8 px9 px10 px11 px12 px13 px14 px15 px16\" left=-37 right=249",
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-37 right=249",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-37 right=249"
+    ]
+  },
+  "files-overwrite-390-dark": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "files-stop-transfer-390-dark": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "sockets-390-dark": "3 sockets, 2 open",
+  "tabs-dropped-390-dark": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "clipped": [
+      "button \"New terminal\" left=355 right=489 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "host-key-changed-1440-dark": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "vault-reset-1440-dark": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "files-overwrite-1440-dark": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "files-stop-transfer-1440-dark": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "sockets-1440-dark": "3 sockets, 2 open",
+  "tabs-dropped-1440-dark": {
+    "clientWidth": 1440,
+    "scrollWidth": 1440,
+    "clipped": []
+  },
+  "connect-320-light": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "select \"8 px9 px10 px11 px12 px13 px14 px15 px16\" left=-83 right=179",
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-83 right=179",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-83 right=179"
+    ]
+  },
+  "connect-appearance-320-light": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": []
+  },
+  "connect-key-320-light": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "select \"8 px9 px10 px11 px12 px13 px14 px15 px16\" left=-83 right=179",
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-83 right=179",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-83 right=179"
+    ]
+  },
+  "session-320-light": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "button \"Enter\" left=279 right=323 (in scroll strip)",
+      "button \"Backspace\" left=329 right=373 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "session-actions-320-light": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "button \"Enter\" left=279 right=323 (in scroll strip)",
+      "button \"Backspace\" left=329 right=373 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "session-files-320-light": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "button \"Enter\" left=279 right=323 (in scroll strip)",
+      "button \"Backspace\" left=329 right=373 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "connect-zoom200-light": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "connect-appearance-zoom200-light": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "connect-key-zoom200-light": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "session-zoom200-light": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "session-actions-zoom200-light": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "session-files-zoom200-light": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "connect-320-dark": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "select \"8 px9 px10 px11 px12 px13 px14 px15 px16\" left=-83 right=179",
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-83 right=179",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-83 right=179"
+    ]
+  },
+  "connect-appearance-320-dark": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": []
+  },
+  "connect-key-320-dark": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "select \"8 px9 px10 px11 px12 px13 px14 px15 px16\" left=-83 right=179",
+      "select \"System MonospaceFira CodeJetBrains MonoC\" left=-83 right=179",
+      "select \"Default DarkSolarized DarkSolarized Ligh\" left=-83 right=179"
+    ]
+  },
+  "session-320-dark": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "button \"Enter\" left=279 right=323 (in scroll strip)",
+      "button \"Backspace\" left=329 right=373 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "session-actions-320-dark": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "button \"Enter\" left=279 right=323 (in scroll strip)",
+      "button \"Backspace\" left=329 right=373 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "session-files-320-dark": {
+    "clientWidth": 320,
+    "scrollWidth": 320,
+    "clipped": [
+      "button \"Enter\" left=279 right=323 (in scroll strip)",
+      "button \"Backspace\" left=329 right=373 (in scroll strip)",
+      "button \"Escape\" left=379 right=424 (in scroll strip)",
+      "button \"Tab\" left=430 right=475 (in scroll strip)",
+      "button \"Control C, interrupt\" left=481 right=525 (in scroll strip)",
+      "button \"Left arrow\" left=531 right=575 (in scroll strip)",
+      "button \"Right arrow\" left=581 right=625 (in scroll strip)",
+      "button \"Control D, end of input\" left=631 right=675 (in scroll strip)",
+      "button \"Control Z, suspend\" left=681 right=725 (in scroll strip)",
+      "button \"Home\" left=731 right=785 (in scroll strip)",
+      "button \"End\" left=791 right=836 (in scroll strip)",
+      "button \"Pipe\" left=842 right=886 (in scroll strip)",
+      "button \"Slash\" left=892 right=936 (in scroll strip)",
+      "button \"Tilde\" left=942 right=986 (in scroll strip)",
+      "button \"Hyphen\" left=992 right=1036 (in scroll strip)"
+    ]
+  },
+  "connect-zoom200-dark": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "connect-appearance-zoom200-dark": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "connect-key-zoom200-dark": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "session-zoom200-dark": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "session-actions-zoom200-dark": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "session-files-zoom200-dark": {
+    "clientWidth": 720,
+    "scrollWidth": 720,
+    "clipped": []
+  },
+  "focus-walk-connect-1440-light": [
+    "summary \"Appearance\" outline=solid 3px offset=2px",
+    "button \"Help\" outline=solid 3px offset=2px",
+    "summary \"About\" outline=solid 3px offset=2px",
+    "input \"\" outline=solid 3px offset=2px",
+    "input \"\" outline=solid 3px offset=2px",
+    "input \"\" outline=solid 3px offset=2px",
+    "input \"\" outline=solid 3px offset=0px",
+    "input \"\" outline=solid 3px offset=2px",
+    "button \"Connect to server\" outline=solid 3px offset=2px",
+    "input \"\" outline=solid 3px offset=2px",
+    "input \"\" outline=solid 3px offset=2px",
+    "button \"Create address book\" outline=solid 3px offset=2px",
+    "body \"localsshAppearanceTerminal app\" outline=none 3px offset=0px",
+    "summary \"Appearance\" outline=solid 3px offset=2px",
+    "button \"Help\" outline=solid 3px offset=2px",
+    "summary \"About\" outline=solid 3px offset=2px"
+  ]
+}

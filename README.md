@@ -48,7 +48,7 @@ others discover the project.
 
 ![Current connection form with password and private-key choices](screenshot1.png)
 
-![Connected terminal tab with its SFTP file panel](screenshot2.png)
+![Two connected terminal tabs with the SFTP file panel open beside the terminal](screenshot2.png)
 
 See the [user guide](docs/USER-GUIDE.md) for the current controls.
 

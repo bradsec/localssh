@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { FolderOpen, LogOut, LucideProvider, Plus, X } from "lucide-react";
+import { FolderOpen, LogOut, LucideProvider, Plus, Unplug, X } from "lucide-react";
 import { ActionsMenu } from "./components/ActionsMenu.js";
 import { About } from "./components/About.js";
 import { ClipboardMenu } from "./components/ClipboardMenu.js";
@@ -509,7 +509,13 @@ export function App() {
                       }
                     }}
                   >
-                    {tab.connecting ? `Connecting to ${tab.host}...` : tab.host}
+                    {!tab.handle && !tab.connecting && <Unplug />}
+                    <span className="terminal-tabs__host">
+                      {tab.connecting ? `Connecting to ${tab.host}...` : tab.host}
+                    </span>
+                    {!tab.handle && !tab.connecting && (
+                      <span className="terminal-tabs__state">Disconnected</span>
+                    )}
                   </button>
                   <button
                     type="button"

@@ -465,14 +465,25 @@ body:has(.app-shell--connect) {
 }
 
 .terminal-tabs [role="tab"] {
-  display: block;
   align-self: center;
-  max-width: 200px;
+  max-width: 280px;
   line-height: var(--target);
   padding: 0 var(--space-1) 0 var(--space-3);
+  white-space: nowrap;
+}
+
+.terminal-tabs__host {
+  min-width: 0;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* A dropped session keeps a shape and a word, so it reads as lost while unselected. */
+.terminal-tabs__state {
+  flex: none;
+  font-size: var(--text-meta);
+  font-weight: 400;
 }
 
 .terminal-tabs [aria-selected="true"] {
@@ -671,6 +682,20 @@ body:has(.app-shell--connect) {
 @media (hover: hover) {
   .file-panel button:hover:not(:disabled) {
     background: var(--surface-subtle);
+  }
+}
+
+/* Replacing a remote file is the one destructive decision in Files. */
+.file-panel .file-panel__danger {
+  border-color: var(--danger);
+  color: var(--danger-text);
+  background: var(--danger);
+}
+
+@media (hover: hover) {
+  .file-panel .file-panel__danger:hover:not(:disabled) {
+    border-color: var(--danger-hover);
+    background: var(--danger-hover);
   }
 }
 
@@ -2102,6 +2127,20 @@ p > .learn-more::after {
     border: 0;
   }
 
+  /* Anchored to their own icon, these panels ran past the left edge of a
+     phone screen. Anchor them to the toolbar's right edge instead. */
+  .toolbar-actions .terminal-settings,
+  .toolbar-actions .about,
+  .toolbar-actions .clipboard-menu {
+    position: static;
+  }
+
+  .toolbar-actions .terminal-settings fieldset,
+  .toolbar-actions .about__panel,
+  .toolbar-actions .clipboard-menu__panel {
+    right: max(var(--space-3), env(safe-area-inset-right));
+  }
+
   .toolbar-actions .toolbar-button,
   .toolbar-actions summary {
     justify-content: center;
@@ -2109,12 +2148,20 @@ p > .learn-more::after {
     padding: 0 var(--space-2);
   }
 
+  /* Stretch, not flex-start: a flex-start column child sizes to its text and
+     ran under the Actions button at 320px. The target wraps rather than
+     truncates so the full user@host:port stays readable. */
   .app-shell--session .session-identity {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: center;
     gap: 0;
     padding-left: var(--space-3);
+  }
+
+  .active-target {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .connection-status {

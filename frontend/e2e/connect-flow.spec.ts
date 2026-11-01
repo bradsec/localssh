@@ -255,3 +255,40 @@ test("reports wrong passphrase and rejected key", async ({ page }) => {
   await page.getByRole("button", { name: /trust and connect/i }).click();
   await expect(page.getByText("The server did not accept this key.")).toBeVisible();
 });
+
+test("keeps the session target clear of the Actions button at 320px", async ({ browser }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  const page = await browser.newPage({ viewport: { width: 320, height: 640 } });
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+  await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Password$/i).fill("s3cret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  const target = page.locator(".active-target");
+  await expect(target).toHaveText(`tester@${address}`);
+  const text = await target.boundingBox();
+  const actions = await page.getByRole("button", { name: "Actions" }).boundingBox();
+  expect(text!.x + text!.width).toBeLessThanOrEqual(actions!.x);
+  expect(await target.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.close();
+});
+
+for (const width of [320, 390]) {
+  test(`keeps toolbar panels on screen at ${width}px`, async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width, height: 700 } });
+    await page.goto("/");
+    for (const [name, panel] of [
+      ["Appearance", ".terminal-settings fieldset"],
+      ["About", ".about__panel"],
+    ] as const) {
+      await page.getByRole("button", { name, exact: true }).click();
+      const box = await page.locator(panel).boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      await page.reload();
+    }
+    await page.close();
+  });
+}

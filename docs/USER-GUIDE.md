@@ -32,7 +32,8 @@ password recovery. If you forget it, delete the address book and start again.
 ## Terminals and files
 
 Select **New terminal** to connect without closing open shells. Select a tab
-to switch shells; closing a tab disconnects only that shell. Closing the page
+to switch shells; closing a tab disconnects only that shell. A tab whose
+connection dropped shows an unplugged icon and **Disconnected**. Closing the page
 disconnects all sessions. Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch
 tabs with a hardware keyboard.
 

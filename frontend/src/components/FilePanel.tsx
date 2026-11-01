@@ -357,7 +357,11 @@ export function FilePanel({ handle, onClose }: { handle: SshHandle; onClose: () 
             file's permissions, but not its owner or access lists. If the name is a link, the link
             itself is replaced and its target is not changed.
           </p>
-          <button type="button" onClick={() => void upload(pendingReplace, true)}>
+          <button
+            className="file-panel__danger"
+            type="button"
+            onClick={() => void upload(pendingReplace, true)}
+          >
             Replace file
           </button>
           <button type="button" onClick={() => setPendingReplace(null)}>

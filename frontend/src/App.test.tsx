@@ -270,6 +270,36 @@ describe("App", () => {
     expect(screen.getByText("Connected", { exact: true })).toBeInTheDocument();
   });
 
+  it("marks a dropped tab without relying on color while another tab is selected", async () => {
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+
+    const live = screen.getByRole("tab", { name: /second.example, connected/i });
+    expect(within(live).queryByText("Disconnected")).not.toBeInTheDocument();
+
+    const { onClose } = vi.mocked(engine.connectSession).mock.calls[1]![0];
+    act(() => onClose("connection lost"));
+    await user.click(screen.getByRole("tab", { name: /first.example, connected/i }));
+
+    const dropped = screen.getByRole("tab", { name: /second.example, disconnected/i });
+    expect(dropped).toHaveAttribute("aria-selected", "false");
+    expect(within(dropped).getByText("Disconnected")).toBeVisible();
+    const icon = dropped.querySelector("svg.lucide-unplug");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(
+      within(screen.getByRole("tab", { name: /first.example, connected/i })).queryByText(
+        "Disconnected",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("writes background output to its own terminal buffer", async () => {
     const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
     const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
