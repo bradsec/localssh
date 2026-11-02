@@ -2759,6 +2759,7 @@ p > .learn-more::after {
     justify-content: center;
     max-width: none;
     min-width: 0;
+    padding-block: var(--space-2);
     line-height: 1.3;
     white-space: normal;
   }
@@ -2826,7 +2827,7 @@ p > .learn-more::after {
     flex-direction: column;
     align-items: stretch;
     justify-content: center;
-    gap: 0;
+    gap: var(--space-1);
     padding-left: var(--space-3);
   }
 
