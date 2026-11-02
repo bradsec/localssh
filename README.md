@@ -257,13 +257,15 @@ cp .env.example .env
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
+| `LOCALSSH_VERSION` | `latest` | Image tag for both images in two-image Compose. |
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface for the web port. Use `0.0.0.0` for LAN access. |
 | `FRONTEND_PORT` | `9080` | Host port for the web interface. |
 | `ALLOWED_ORIGINS` | local frontend URLs in two-image Compose; `*` with same-origin Host checks in the combined image | Browser origins allowed to use the relay. Explicit entries match exact scheme, host, and port; `*` permits any origin in the standalone relay. |
 | `PUBLIC_HOSTS` | unset | Combined image only. Comma-separated public page hostnames allowed in default same-origin mode; case-insensitive, without ports. |
 | `ALLOWED_HOSTS` | `*` | Comma-separated target hosts. `*.example.com` matches subdomains, not the bare name. A hostname rule trusts DNS for that name. |
 | `ALLOWED_PORTS` | `22` | Comma-separated target TCP ports. |
-| `MAX_SESSIONS` | `256` | Maximum concurrent relay sessions. New sessions receive HTTP 503 at capacity. |
+| `MAX_SESSIONS` | `256` | Maximum active plus detached relay sessions. At capacity, the relay evicts the oldest detached session; it refuses a new connection if all are attached. Budget about 896 KiB of RAM per attached session. |
+| `KEEPALIVE_MAX_SECONDS` | `3600` (`0` when `ALLOWED_ORIGINS=*` is explicitly set) | Maximum detached-session lifetime in seconds. `0` permits v1 only. `unlimited` holds orphaned sessions until capacity eviction, relay restart, or server-side close. Set an explicit value to enable resume with wildcard origins. |
 | `TARGET_CONNECT_TIMEOUT_MS` | `10000` | Maximum time in milliseconds for the relay to establish a target TCP connection. |
 | `PORT` | `80` combined, `8787` standalone relay | Container listener port; change the Docker port mapping with it. |
 | `HOST` | `0.0.0.0` | Listener interface inside the container. |
@@ -284,6 +286,27 @@ In the combined image, the default same-origin check accepts IP addresses,
 the page under your own domain; matching Origin and Host headers alone cannot
 protect the relay from DNS rebinding. An explicit `ALLOWED_ORIGINS` list keeps
 its existing behavior and does not use `PUBLIC_HOSTS`.
+
+The combined image's unset `ALLOWED_ORIGINS` uses same-origin Host checks and
+the 3600-second keep-alive default. Explicit `ALLOWED_ORIGINS=*` disables resume
+unless `KEEPALIVE_MAX_SECONDS` is set. The relay reports support and its cap at
+`GET /capabilities` in the combined image, or `GET /relay/capabilities` through
+the two-image nginx proxy. A direct standalone relay also answers
+`GET /capabilities`. Cross-origin pages can read this response only when their
+Origin is in `ALLOWED_ORIGINS`; the supplied frontend CSP permits `ws:` and
+`wss:` but only same-origin HTTP requests. Supported deployments use the page
+and relay on the same origin.
+
+For resumable sessions, the relay may take up to 90 seconds to detect an
+inactive page before it starts the keep-alive period. Output can stall while
+the page is away because the relay pauses TCP reads when its buffer fills.
+The SSH server's `ClientAliveInterval` can end a held connection sooner.
+Keep each session on one relay instance: a relay restart loses its sessions.
+Use `tmux` on the SSH host for commands that must keep running if the page or
+relay disappears. `unlimited` can leave closed-tab sessions holding sockets
+until capacity eviction, restart, or server-side close. Size `MAX_SESSIONS`
+for available RAM; 256 attached sessions at about 896 KiB each use up to
+about 224 MiB for session state.
 
 Unless it is `*`, `ALLOWED_ORIGINS` must contain every exact URL used to open the
 interface, including its scheme, hostname or address, and non-default port. For a
@@ -435,21 +458,41 @@ encryption behind it is.
 
 ## Terminal
 
-Font, font size, and colour scheme are configurable from the Appearance menu
-and persist in `localStorage`. System Monospace is the default; Fira Code,
+Font, font size, line height, and colour scheme are configurable from **Settings**.
+All-host settings persist in `localStorage`. Line height defaults to 1.15 and
+ranges from 1.00 to 2.00 in 0.05 steps. Changes apply to open terminals. For a
+saved host, unlock the vault and choose **This host** under **Apply to** to store
+its terminal settings in the encrypted vault. Removing that override restores
+the all-host settings. System Monospace is the default; Fira Code,
 JetBrains Mono, Cascadia Code, IBM Plex Mono, and Source Code Pro are available
 as optional bundled fonts. Font size is a picker, which a phone renders as a
 scroll wheel. The terminal reports its fitted size to the remote PTY, so
 resizing the window, rotating a phone, or opening an on-screen keyboard keeps
 width-aware commands formatting correctly.
 
-Select **New terminal** to connect to another server. Select a tab to switch
-shells, or its close button to disconnect only that shell. On a hardware
+Select **New terminal** to connect to another server. On a phone, select the
+target to open **Open terminals** and switch shells; on desktop, select a tab.
+Close disconnects only that shell. On a hardware
 keyboard, Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch tabs. Closing the
-page disconnects all sessions. If the relay reaches `MAX_SESSIONS`, close a
+page disconnects all sessions in v1/Off mode. If the relay reaches `MAX_SESSIONS`, close a
 terminal and try again; the browser cannot distinguish this from other failed
 WebSocket handshakes. SSH keepalives
 detect silent network loss and show a connection error after missed replies.
+In **Settings**, choose **Off**, **2 min** (default), **5 min**, **10 min**,
+**15 min**, **1 hour**, or **Until I disconnect** for terminals opened next.
+The relay may cap the time; Settings shows the effective limit. While the
+session is held, anyone using this browser can access its terminal without
+signing in. Choose a shorter time on a shared device.
+
+With keep-alive enabled and a relay that supports resume, leaving the page
+detaches the transport. On return, **Resuming** keeps the terminal output in
+view until the same SSH session returns. If it has ended, a recovery row shows
+the cause and offers **Reconnect** and **Close terminal**. **Select text**
+remains available for closed-session output. Reconnect uses credentials in one
+tap only when they are in the unlocked vault. Otherwise, the connect form opens
+with host, port, and user filled. New output follows a marker identifying the
+new connection. Reloading starts a new page and requires a new login. Use
+`tmux` or `screen` on the server for work that must survive a closed session.
 If a new connection needs a host-key check, **Return to open terminal** keeps
 the other shells available; select the connecting tab to resume the check.
 
@@ -475,7 +518,13 @@ lost connection is removed the next time its folder is listed after 24 hours.
 Select the download action beside a file to save it through the browser.
 Transfers keep up to 16 requests of 32 KiB in flight; the browser uses file
 storage when available, with a 16 MiB memory fallback when it is not. On
-iPhone or iPad, use the browser's download, Share, or Save to Files action when
+iPhone or iPad, a download pauses while the page is in the background and
+continues when the session resumes. Keep localssh open until it finishes. If
+the session expires, sign in to the same host and choose **Resume download**
+to continue from saved bytes. If the remote file changed or partial data is
+missing, choose **Retry** to start over. If iOS closes the page, it may remove
+partial download data; reload, sign in, and retry when resume is unavailable.
+Use the browser's download, Share, or Save to Files action when
 prompted. If automatic saving is blocked, select **Save download** in the file
 panel; the browser copy stays for 10 minutes or until the next transfer, Close
 files, or leaving the page. **Close files** leaves the terminal connected and
@@ -497,9 +546,10 @@ The interface is built for a small touch screen as much as for a desktop
 browser. On a phone the terminal runs to the edges of the screen, and controls
 stay at or above the 44px touch target. Below 1024px wide, a session toolbar
 shows the connection status and target beside one **Actions** button, which
-holds Files, Disconnect, Clipboard, Appearance, Help, and About. Pinch-zoom is disabled over the terminal, where
-zooming would hide the prompt and reflow nothing: set the font size from the
-Appearance menu instead.
+holds Files, Disconnect, Clipboard, Settings, Help, and About. In short phone
+landscape with the keyboard open, the target and key bar share a row at the top
+to leave more room for terminal output. Pinch does not change terminal text
+size; use Settings or the Text smaller and Text larger keys.
 
 Connection details come before the optional saved-host vault. The connect page
 scrolls when its contents exceed the viewport, including while the keyboard is
@@ -513,47 +563,49 @@ dismissing it is left to the keyboard's own control.
 ### Key bar
 
 A touch device gets a key bar along the bottom of the session, carrying the keys
-a phone keyboard has none of. It stays up for the whole session, above the
-on-screen keyboard when that is open and on its own when it is not:
+a phone keyboard has none of. It stays above the on-screen keyboard when that
+is open and on its own when it is not. A closed session shows recovery controls
+in its place. The key bar includes:
 
 | Keys                       | Notes                                              |
 | -------------------------- | -------------------------------------------------- |
 | Keyboard icon              | Raises and dismisses the on-screen keyboard, for reading output on a full screen and typing again without hunting for the terminal. |
 | `ctrl`, `alt`              | Sticky. One tap arms them for the next key, a second locks them until tapped off. |
 | `↑`, `↓`, `⏎`              | Recall a command and run it without opening the keyboard at all. |
-| `esc`, `tab`               |                                                    |
+| `esc`, `tab`, `⇧tab`       | Escape, Tab, and Shift Tab.                        |
 | `^C`, `^D`, `^Z`           | Interrupt, end of input, suspend.                  |
 | `←`, `→`, `home`, `end`    | Sent in whichever encoding the terminal is in, so they work inside `vim` and `less`. |
 | `\|`, `/`, `~`, `-`        | Punctuation buried behind a shift on a phone.      |
+| `A-`, `A+`               | Text smaller and Text larger, within 8 to 32 px.   |
 
 With `ctrl` armed, a letter typed on the system keyboard arrives as its control
-code, so `ctrl` then `r` is a reverse history search. The bar scrolls sideways
-when the screen is too narrow for all of it, and tapping a key never takes focus
-from the terminal, so the keyboard does not close underneath it.
+code, so `ctrl` then `r` is a reverse history search. The row shows as many keys
+as fit between Keyboard (always first) and More keys (always last), so it never
+scrolls sideways. The rest are in the More keys panel, which takes the
+on-screen keyboard's place, holds up to four rows (40 percent of the screen at
+most, scrolling inside), and stays open while you tap keys. Keyboard, More keys,
+Escape, switching terminals, Files or Settings close it. Tapping a key in the
+row never takes focus from the terminal, so the keyboard does not close
+underneath it.
+
+In **Settings**, **Edit key bar** lets you move, remove, add, or reset keys.
+Keyboard and More keys stay fixed. The order is saved on this device.
 
 ### Touch gestures
 
-For devices with no physical Tab or arrow keys:
-
-| Gesture            | Action           |
-| ------------------ | ---------------- |
-| Swipe right        | Tab              |
-| Swipe left         | Esc              |
-| Flick up or down   | Command history  |
-| Long press and drag | Select terminal text |
-
-The gesture is recognised from the movement itself, not the release, so it still
-lands on iPadOS, where Safari cancels the touch as soon as it starts scrolling.
-Vertical flicks defer to scrollback: a flick must be quick and short, while a
-slower or longer vertical drag scrolls history normally. Dragging with two
-fingers scrolls the output.
+On a phone, drag vertically with one finger to scroll terminal output. A
+horizontal drag or prompt flick sends no shell key; use the visible key bar.
+Long press or select **Select text** to open a read-only view with native text
+selection. It also works after a session closes. Desktop and tablet terminal
+gestures remain unchanged.
 
 ### Clipboard
 
-Long-press terminal output and drag to select it. Because xterm renders to a
-canvas, Safari cannot show its native text-selection handles; localssh draws the
-selection in the terminal instead. A **Clipboard** menu sits in the session
-toolbar (under **Actions** below 1024px wide) for copying that selection and for pasting without a hardware keyboard:
+On touch screens, long press or select **Select text** to open a read-only view
+with native selection handles. Select text there and use the device's Copy
+action. A **Clipboard** menu sits in the session toolbar (under **Actions**
+below 1024px wide) for copying a live terminal selection and pasting without a
+hardware keyboard:
 
 | Control                | Action                                                     |
 | ---------------------- | ---------------------------------------------------------- |

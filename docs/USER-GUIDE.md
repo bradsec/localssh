@@ -31,11 +31,27 @@ password recovery. If you forget it, delete the address book and start again.
 
 ## Terminals and files
 
-Select **New terminal** to connect without closing open shells. Select a tab
-to switch shells; closing a tab disconnects only that shell. A tab whose
-connection dropped shows an unplugged icon and **Disconnected**. Closing the page
-disconnects all sessions. Ctrl+Alt+Shift+Left and Ctrl+Alt+Shift+Right switch
-tabs with a hardware keyboard.
+Select **New terminal** to connect without closing open shells. On a phone,
+select the target to open **Open terminals** and switch shells; on desktop,
+select a tab. Closing a terminal disconnects only that shell. A dropped tab
+shows an unplugged icon and **Disconnected**. Ctrl+Alt+Shift+Left and
+Ctrl+Alt+Shift+Right switch tabs with a hardware keyboard.
+
+In **Settings**, choose **Off**, **2 min** (default), **5 min**, **10 min**,
+**15 min**, **1 hour**, or **Until I disconnect** for new terminals. The relay
+may cap the time; Settings shows its limit. When you switch apps or lock your
+phone, a supported relay holds the SSH session for the chosen time. While it
+is held, anyone using this browser can use its terminal without signing in.
+Choose a shorter time on a shared device. Off or a relay without resume closes
+the session when the connection drops. Open terminals keep their original time.
+
+On return, **Resuming** means localssh is restoring the same session. If it
+ends, the recovery row names the cause and offers **Reconnect** and **Close
+terminal**. **Select text** still opens its output. One-tap Reconnect uses
+credentials only when stored in an unlocked vault. Otherwise, the connect form
+opens with host, port, and user filled. A marker separates old output from the
+new connection. Reloading starts a new page and needs a new login. Use `tmux`
+or `screen` for work that must continue when a session ends.
 
 Select **Files** in a connected tab to browse that server over SFTP. Below 1024px
 wide, Files, Disconnect, and Clipboard are under **Actions** in the toolbar.
@@ -71,14 +87,28 @@ Downloads use browser file storage when available. The fallback without that
 storage has a 16 MiB limit. On iPhone or iPad, use the browser's download,
 Share, or Save to Files action. **Save download** remains available for 10
 minutes, or until the next transfer, closing Files, or leaving the page.
+Downloads pause while localssh is in the background and continue when the
+session resumes. Keep localssh open until one finishes. If the session expires,
+sign in to the same host and choose **Resume download** to continue from saved
+bytes. If the file changed on the server or partial data is missing, choose
+**Retry** to start over. If iOS closes the page, partial data may be lost.
 
 ## Touch and clipboard
 
-The touch key bar supplies Esc, Tab, arrows, and shell keys. Tap Ctrl or Alt
-once for the next key, twice to lock it, and a third time to turn it off.
-Swipe right for Tab, left for Esc, flick vertically near the prompt for command
-history, and drag with two fingers to scroll output. Long press and drag to
-select terminal text. Use **Appearance** to change font, size, or color scheme.
+The touch key bar shows as many keys as fit between Keyboard and **More keys**.
+More keys opens the rest in place of the on-screen keyboard. Tap Ctrl or Alt
+once for the next key, twice to lock it, and a third time to turn it off. The
+bar includes Shift Tab and Text smaller/Text larger. **Settings**, **Edit key
+bar** lets you reorder, add, remove, or reset keys. Keyboard and More keys
+stay fixed. Drag vertically with one finger to scroll output; horizontal drags
+and prompt flicks send no shell keys. Long press or select **Select text** to
+open a read-only view with native selection handles.
+
+Use **Settings** to change font, size, line height, and color scheme. Line
+height defaults to 1.15 and ranges from 1.00 to 2.00 in 0.05 steps. Changes
+apply to open terminals. With an unlocked vault, choose **This host** under
+**Apply to** to keep a saved host's terminal settings in the vault. In short
+phone landscape with the keyboard open, the target and key bar share a top row.
 
 Open **Clipboard** to copy the selection or paste into the terminal. If the
 browser blocks clipboard access, use the text field and the device's Copy or
