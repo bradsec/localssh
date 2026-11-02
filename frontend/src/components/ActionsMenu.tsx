@@ -12,7 +12,7 @@ export interface ActionsMenuProps {
  * or overlap the brand and the session target to fit.
  *
  * It is a disclosure rather than an ARIA menu because the controls inside are
- * themselves disclosures (Clipboard, Appearance, About) with fields in them.
+ * themselves disclosures (Clipboard, About) with fields in them.
  */
 export function ActionsMenu({ children }: ActionsMenuProps) {
   const rootRef = useRef<HTMLDivElement>(null);

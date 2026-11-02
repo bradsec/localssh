@@ -1,13 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { App } from "./App.js";
 import { APP_VERSION } from "./appVersion.js";
 import { DEFAULT_FONT_FAMILY } from "./terminalFonts.js";
-import { DEFAULT_THEME_NAME } from "./terminalThemes.js";
+import { DEFAULT_THEME_NAME, TERMINAL_THEMES } from "./terminalThemes.js";
 import * as engine from "./ssh/engine.js";
 import * as knownHostsStore from "./storage/knownHostsStore.js";
+import * as relayCapabilities from "./relayCapabilities.js";
+import * as vaultHook from "./vault/useVault.js";
 
 vi.mock("./ssh/engine.js", async () => {
   const actual = await vi.importActual<typeof engine>("./ssh/engine.js");
@@ -16,6 +18,15 @@ vi.mock("./ssh/engine.js", async () => {
 vi.mock("./storage/knownHostsStore.js", async () => {
   const actual = await vi.importActual<typeof knownHostsStore>("./storage/knownHostsStore.js");
   return { ...actual, loadKnownHosts: vi.fn(), trustHostKey: vi.fn() };
+});
+vi.mock("./vault/useVault.js", async () => {
+  const actual = await vi.importActual<typeof vaultHook>("./vault/useVault.js");
+  return { ...actual, useVault: vi.fn(actual.useVault) };
+});
+const realUseVault = (await vi.importActual<typeof vaultHook>("./vault/useVault.js")).useVault;
+vi.mock("./relayCapabilities.js", async () => {
+  const actual = await vi.importActual<typeof relayCapabilities>("./relayCapabilities.js");
+  return { ...actual, fetchRelayCapabilities: vi.fn() };
 });
 
 const terminalReset = vi.fn();
@@ -30,6 +41,7 @@ let terminalSelectionChange: ((hasSelection: boolean) => void) | undefined;
 const terminalPaste = vi.fn();
 const terminalWrites: ReturnType<typeof vi.fn>[] = [];
 let terminalSelectionText = "";
+let terminalSnapshotText = "first output";
 let deferTerminalReady = false;
 let completeTerminalReady: (() => void) | undefined;
 
@@ -40,7 +52,12 @@ vi.mock("./components/Terminal.js", () => ({
     onInput,
     onFocusChange,
     onSelectionChange,
+    onSelectText,
     active,
+    fontSize,
+    fontFamily,
+    lineHeight,
+    theme,
   }: {
     onResize?: (cols: number, rows: number) => void;
     onReady?: (controls: {
@@ -50,12 +67,18 @@ vi.mock("./components/Terminal.js", () => ({
       blur: () => void;
       applicationCursorMode: () => boolean;
       getSelection: () => string;
+      snapshotText: () => string;
       paste: (text: string) => void;
     }) => void;
     onInput?: (data: string) => void;
     onFocusChange?: (focused: boolean) => void;
     onSelectionChange?: (hasSelection: boolean) => void;
+    onSelectText?: () => void;
     active: boolean;
+    fontSize: number;
+    fontFamily: string;
+    lineHeight: number;
+    theme: { background?: string };
   }) => {
     const write = useRef(vi.fn());
     if (!terminalWrites.includes(write.current)) terminalWrites.push(write.current);
@@ -71,11 +94,21 @@ vi.mock("./components/Terminal.js", () => ({
       blur: terminalBlur,
       applicationCursorMode: () => false,
       getSelection: () => terminalSelectionText,
+      snapshotText: () => terminalSnapshotText,
       paste: terminalPaste,
     };
     if (deferTerminalReady) completeTerminalReady = () => onReady?.(controls);
     else onReady?.(controls);
-    return <div aria-label="SSH terminal emulator" />;
+    return (
+      <div
+        aria-label="SSH terminal emulator"
+        data-font-size={fontSize}
+        data-font-family={fontFamily}
+        data-line-height={lineHeight}
+        data-background={theme.background}
+        onClick={onSelectText}
+      />
+    );
   },
 }));
 
@@ -107,6 +140,36 @@ function useNarrowScreen() {
   })) as typeof window.matchMedia;
 }
 
+function usePhoneScreen() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("max-width: 1023px") || query.includes("max-width: 719px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
+/** A phone with a touch pointer: the key bar and recovery row only show on touch. */
+function useTouchPhone() {
+  window.matchMedia = ((query: string) => ({
+    matches:
+      query.includes("coarse") ||
+      query.includes("max-width: 1023px") ||
+      query.includes("max-width: 719px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia;
+}
+
 /** Fills in the connect form and waits for the session to be up. */
 async function submitConnect(user: ReturnType<typeof userEvent.setup>, host: string) {
   await user.type(screen.getByLabelText(/^host$/i), host);
@@ -118,6 +181,52 @@ async function submitConnect(user: ReturnType<typeof userEvent.setup>, host: str
 async function connect(user: ReturnType<typeof userEvent.setup>, host: string) {
   await submitConnect(user, host);
   await screen.findByRole("button", { name: /disconnect/i });
+}
+
+const SAVED_WEB = {
+  id: "a",
+  nickname: "web",
+  host: "10.0.0.4",
+  port: 22,
+  username: "deploy",
+  hasPassword: true,
+};
+
+function vaultApi(overrides: Partial<vaultHook.VaultApi> = {}): vaultHook.VaultApi {
+  return {
+    status: "unlocked",
+    entries: [SAVED_WEB],
+    busy: false,
+    error: null,
+    create: vi.fn(),
+    unlock: vi.fn(),
+    save: vi.fn(),
+    remove: vi.fn(),
+    changePassword: vi.fn(),
+    lock: vi.fn(),
+    reset: vi.fn(),
+    clearError: vi.fn(),
+    ...overrides,
+  };
+}
+
+const RECONNECT_MARKER = "[localssh] New connection. Output above is from the closed session.";
+
+/** Everything any terminal was asked to draw, decoded. */
+function drawnText(): string {
+  const decoder = new TextDecoder();
+  return terminalWrites
+    .flatMap((write) => write.mock.calls.map(([chunk]) => decoder.decode(chunk as Uint8Array)))
+    .join("");
+}
+
+function newHandle(): engine.SshHandle {
+  return { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+}
+
+/** Ends the session opened by the given connect call, as a dropped network would. */
+function dropSession(call = 0) {
+  act(() => vi.mocked(engine.connectSession).mock.calls[call]![0].onClose("connection lost"));
 }
 
 function sentBytes(handle: engine.SshHandle): string {
@@ -132,6 +241,8 @@ describe("App", () => {
   beforeEach(() => {
     vi.mocked(engine.connectSession).mockReset();
     vi.mocked(knownHostsStore.loadKnownHosts).mockResolvedValue(new Map());
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockReset();
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockResolvedValue("unknown");
     terminalReset.mockClear();
     terminalFocus.mockClear();
     terminalBlur.mockClear();
@@ -142,10 +253,532 @@ describe("App", () => {
     terminalPaste.mockClear();
     terminalWrites.length = 0;
     terminalSelectionText = "";
+    terminalSnapshotText = "first output";
     deferTerminalReady = false;
     completeTerminalReady = undefined;
     usePointer("fine");
     localStorage.clear();
+    vi.mocked(vaultHook.useVault).mockImplementation(realUseVault);
+  });
+
+  it("applies a saved host override only to its tab and falls back when locked or removed", async () => {
+    const host = {
+      ...SAVED_WEB,
+      terminal: {
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: 20,
+        lineHeight: 1.5,
+        themeName: "Nord",
+      },
+    };
+    vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi({ entries: [host] }));
+    vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+    const { rerender } = render(<App />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^web:/i }));
+    await screen.findByRole("tabpanel", { name: "10.0.0.4 terminal" });
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await submitConnect(user, "other.example");
+    const web = document.querySelector<HTMLElement>(
+      '[aria-label="10.0.0.4 terminal"] [aria-label="SSH terminal emulator"]',
+    )!;
+    const other = within(
+      screen.getByRole("tabpanel", { name: "other.example terminal" }),
+    ).getByLabelText("SSH terminal emulator");
+    expect(web).toHaveAttribute("data-font-size", "20");
+    expect(web).toHaveAttribute("data-line-height", "1.5");
+    expect(web).toHaveAttribute("data-font-family", '"JetBrains Mono", monospace');
+    expect(web).toHaveAttribute("data-background", TERMINAL_THEMES.Nord!.background);
+    expect(other).toHaveAttribute("data-font-size", "14");
+    vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi({ status: "locked", entries: [] }));
+    rerender(<App />);
+    expect(web).toHaveAttribute("data-font-size", "14");
+    expect(web).toHaveAttribute("data-background", TERMINAL_THEMES[DEFAULT_THEME_NAME]!.background);
+    vi.mocked(vaultHook.useVault).mockReturnValue(
+      vaultApi({ entries: [{ ...host, terminal: undefined }] }),
+    );
+    rerender(<App />);
+    expect(web).toHaveAttribute("data-font-size", "14");
+  });
+
+  it("changes the active host override with the text size key", async () => {
+    usePointer("coarse");
+    const host = {
+      ...SAVED_WEB,
+      terminal: {
+        fontFamily: DEFAULT_FONT_FAMILY,
+        fontSize: 20,
+        lineHeight: 1.15,
+        themeName: DEFAULT_THEME_NAME,
+      },
+    };
+    const save = vi.fn(async () => true);
+    vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi({ entries: [host], save }));
+    vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^web:/i }));
+    await screen.findByRole("toolbar", { name: "Terminal keys" });
+    await user.click(screen.getByRole("button", { name: "Text larger" }));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "a", terminal: expect.objectContaining({ fontSize: 21 }) }),
+    );
+    expect(localStorage.getItem("terminalSettings")).toBeNull();
+  });
+
+  describe("one-tap Reconnect", () => {
+    it.each([{ host: "other.test" }, { port: 2222 }, { username: "other" }])(
+      "opens the prefilled form when a saved entry changed: %o",
+      async (change) => {
+        useTouchPhone();
+        vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi());
+        vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+        const { rerender } = render(<App />);
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: /^web:/i }));
+        await screen.findByRole("button", { name: "Open terminals" });
+        vi.mocked(vaultHook.useVault).mockReturnValue(
+          vaultApi({ entries: [{ ...SAVED_WEB, ...change }] }),
+        );
+        rerender(<App />);
+        dropSession();
+
+        await user.click(screen.getByRole("button", { name: "Reconnect" }));
+        expect(engine.connectSession).toHaveBeenCalledOnce();
+        expect(screen.getByLabelText(/^host$/i)).toHaveValue(SAVED_WEB.host);
+        expect(screen.getByLabelText(/^port$/i)).toHaveValue(SAVED_WEB.port);
+        expect(screen.getByLabelText(/^username$/i)).toHaveValue(SAVED_WEB.username);
+        expect(screen.getByLabelText(/^password$/i)).toHaveFocus();
+      },
+    );
+
+    it("reconnects in place from the unlocked vault and marks the new output once", async () => {
+      useTouchPhone();
+      vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi());
+      let finish: (handle: engine.SshHandle) => void = () => {};
+      vi.mocked(engine.connectSession)
+        .mockResolvedValueOnce(newHandle())
+        .mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+      render(<App />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /^web:/i }));
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(vi.mocked(engine.connectSession).mock.calls[1]![0]).toMatchObject({
+        host: "10.0.0.4",
+        port: 22,
+        username: "deploy",
+        password: { kind: "vault", entryId: "a" },
+      });
+      expect(screen.queryByLabelText(/^host$/i)).not.toBeInTheDocument();
+      expect(screen.getByText("Connecting to 10.0.0.4...")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+
+      await act(async () => finish(newHandle()));
+      expect(await screen.findByRole("toolbar", { name: "Terminal keys" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
+      act(() =>
+        vi.mocked(engine.connectSession).mock.calls[1]![0].onData(new TextEncoder().encode("$ ")),
+      );
+      act(() =>
+        vi.mocked(engine.connectSession).mock.calls[1]![0].onTransportStatus?.("connected", {
+          grantedGraceMs: 120000,
+          capGraceMs: 3600000,
+        }),
+      );
+      const drawn = drawnText();
+      expect(drawn.split(RECONNECT_MARKER)).toHaveLength(2);
+      expect(drawn.indexOf(RECONNECT_MARKER)).toBeLessThan(drawn.indexOf("$ "));
+      await user.click(screen.getByRole("button", { name: "Open terminals" }));
+      expect(screen.getAllByRole("tab")).toHaveLength(1);
+    });
+
+    it("opens a prefilled form when the vault is locked, then replaces the tab in place", async () => {
+      useTouchPhone();
+      vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi());
+      vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+      const { rerender } = render(<App />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /^web:/i }));
+      await screen.findByRole("button", { name: "Open terminals" });
+      vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi({ status: "locked", entries: [] }));
+      rerender(<App />);
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(engine.connectSession).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText(/^host$/i)).toHaveValue("10.0.0.4");
+      expect(screen.getByLabelText(/^username$/i)).toHaveValue("deploy");
+      expect(screen.getByLabelText(/^password$/i)).toHaveFocus();
+
+      await user.type(screen.getByLabelText(/^password$/i), "secret");
+      await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
+      expect(await screen.findByRole("toolbar", { name: "Terminal keys" })).toBeInTheDocument();
+      expect(vi.mocked(engine.connectSession).mock.calls[1]![0].password).toEqual({
+        kind: "typed",
+        value: "secret",
+      });
+      expect(drawnText().split(RECONNECT_MARKER)).toHaveLength(2);
+      await user.click(screen.getByRole("button", { name: "Open terminals" }));
+      expect(screen.getAllByRole("tab")).toHaveLength(1);
+    });
+
+    it("opens a prefilled form after a typed password and never reuses it", async () => {
+      useTouchPhone();
+      vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+      render(<App />);
+      const user = userEvent.setup();
+      await submitConnect(user, "first.example");
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(engine.connectSession).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText(/^host$/i)).toHaveValue("first.example");
+      expect(screen.getByLabelText(/^port$/i)).toHaveValue(22);
+      expect(screen.getByLabelText(/^username$/i)).toHaveValue("admin");
+      expect(screen.getByLabelText(/^password$/i)).toHaveValue("");
+      expect(screen.getByLabelText(/^password$/i)).toHaveFocus();
+    });
+
+    it("opens a prefilled form after key authentication", async () => {
+      useTouchPhone();
+      vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+      render(<App />);
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText(/^host$/i), "keyed.example");
+      await user.type(screen.getByLabelText(/^username$/i), "pi");
+      await user.click(screen.getByLabelText(/^private key$/i));
+      await user.type(screen.getByLabelText(/or paste the private key/i), "key-data");
+      await user.click(screen.getByRole("button", { name: /^connect to server$/i }));
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(engine.connectSession).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText(/^host$/i)).toHaveValue("keyed.example");
+      expect(screen.getByLabelText(/^username$/i)).toHaveValue("pi");
+      expect(screen.getByLabelText(/^password$/i)).toHaveFocus();
+    });
+
+    it("leaves the closed tab in recovery when the user goes back from the form", async () => {
+      useTouchPhone();
+      vi.mocked(engine.connectSession).mockResolvedValue(newHandle());
+      render(<App />);
+      const user = userEvent.setup();
+      await submitConnect(user, "first.example");
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+
+      await user.click(screen.getByRole("tab", { name: /first.example, disconnected/i }));
+      expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Open terminals" }));
+      await user.click(screen.getByRole("button", { name: "New terminal" }));
+      expect(screen.getByLabelText(/^host$/i)).toHaveValue("");
+    });
+
+    it("still blocks a changed host key on a vault reconnect", async () => {
+      useTouchPhone();
+      vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi());
+      vi.mocked(knownHostsStore.loadKnownHosts).mockResolvedValue(
+        new Map([["10.0.0.4:22", "SHA256:old"]]),
+      );
+      vi.mocked(engine.connectSession)
+        .mockResolvedValueOnce(newHandle())
+        .mockRejectedValueOnce(new engine.HostKeyRejectedError("10.0.0.4:22", "SHA256:new"));
+      render(<App />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /^web:/i }));
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(await screen.findByRole("heading", { name: "Host key changed" })).toBeInTheDocument();
+      expect(knownHostsStore.trustHostKey).not.toHaveBeenCalled();
+      expect(screen.queryByRole("toolbar", { name: "Terminal keys" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /cancel/i }));
+      expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+      expect(drawnText()).not.toContain(RECONNECT_MARKER);
+    });
+
+    it("shows a failed reconnect in the recovery row and retries", async () => {
+      useTouchPhone();
+      vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi());
+      vi.mocked(engine.connectSession)
+        .mockResolvedValueOnce(newHandle())
+        .mockRejectedValueOnce(new Error("dial tcp: connection refused"))
+        .mockResolvedValueOnce(newHandle());
+      render(<App />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /^web:/i }));
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(await screen.findByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+      expect(within(screen.getByTestId("recovery-row")).getByRole("alert")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^host$/i)).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      expect(await screen.findByRole("toolbar", { name: "Terminal keys" })).toBeInTheDocument();
+      expect(engine.connectSession).toHaveBeenCalledTimes(3);
+    });
+
+    it("cancels a reconnect in progress and closes the late session", async () => {
+      useTouchPhone();
+      vi.mocked(vaultHook.useVault).mockReturnValue(vaultApi());
+      let finish: (handle: engine.SshHandle) => void = () => {};
+      vi.mocked(engine.connectSession)
+        .mockResolvedValueOnce(newHandle())
+        .mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+      render(<App />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /^web:/i }));
+      await screen.findByRole("button", { name: "Open terminals" });
+      dropSession();
+
+      await user.click(screen.getByRole("button", { name: "Reconnect" }));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+      const late = newHandle();
+      await act(async () => finish(late));
+      expect(late.close).toHaveBeenCalledOnce();
+      expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+      expect(drawnText()).not.toContain(RECONNECT_MARKER);
+    });
+  });
+
+  it("switches and closes phone sessions from the target, then restores focus on dismissal", async () => {
+    usePhoneScreen();
+    const first: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const second: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await submitConnect(user, "first.example");
+    await screen.findByText("Connected");
+
+    const opener = screen.getByRole("button", { name: /open terminals/i });
+    expect(screen.queryByRole("tablist", { name: "Open terminals" })).not.toBeInTheDocument();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await submitConnect(user, "second.example");
+    await screen.findByText("Connected");
+    await user.click(screen.getByRole("button", { name: /open terminals/i }));
+
+    const list = screen.getByRole("tablist", { name: "Open terminals" });
+    expect(within(list).getByText("admin@first.example:22")).toBeInTheDocument();
+    await user.click(within(list).getByRole("tab", { name: /first.example, connected/i }));
+    expect(first.close).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /open terminals/i })).toHaveTextContent(
+      "first.example",
+    );
+
+    await user.click(screen.getByRole("button", { name: /open terminals/i }));
+    await user.click(screen.getByRole("button", { name: "Close second.example terminal" }));
+    expect(second.close).toHaveBeenCalledOnce();
+    expect(first.close).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("tablist", { name: "Open terminals" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open terminals/i })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: /open terminals/i }));
+    await user.click(screen.getByLabelText("SSH terminal emulator"));
+    expect(screen.queryByRole("tablist", { name: "Open terminals" })).not.toBeInTheDocument();
+  });
+
+  it("opens a frozen selectable view from the visible control and blocks terminal input", async () => {
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+    usePointer("coarse");
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+
+    await user.click(screen.getByRole("button", { name: "Select text" }));
+    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
+    expect(terminalBlur).toHaveBeenCalled();
+    expect(terminalActive).toBe(false);
+
+    terminalSnapshotText = "later output";
+    act(() => terminalInput?.("unsafe"));
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onData(new Uint8Array([65])));
+    expect(sentBytes(handle)).toBe("");
+    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
+    expect(screen.getByRole("dialog", { name: "Select text" })).not.toHaveTextContent(
+      "later output",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Close text view" }));
+    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
+    expect(terminalActive).toBe(true);
+  });
+
+  it("opens from a long press and clears the view when its tab closes", async () => {
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+
+    await user.click(screen.getByLabelText("SSH terminal emulator"));
+    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
+    await user.click(screen.getByRole("button", { name: "Close first.example terminal" }));
+    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
+  });
+
+  it("clears the text view when the SSH connection closes", async () => {
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    usePointer("coarse");
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Select text" }));
+
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose("connection lost"));
+    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
+  });
+
+  it("shows recovery after background loss and lets a closed tab select text", async () => {
+    useTouchPhone();
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    await submitConnect(userEvent.setup(), "first.example");
+    await screen.findByRole("button", { name: "Open terminals" });
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose("connection lost"));
+
+    expect(
+      screen.getByText("The connection closed while localssh was in the background."),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/start them in tmux or screen/)).toBeInTheDocument();
+    expect(screen.queryByRole("toolbar", { name: "Terminal keys" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Select text" }));
+    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
+  });
+
+  it("shows network recovery without the background hint and keeps focus on return", async () => {
+    useTouchPhone();
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    await submitConnect(userEvent.setup(), "first.example");
+    await screen.findByRole("button", { name: "Open terminals" });
+    const switcher = screen.getByRole("button", { name: "Open terminals" });
+    act(() => switcher.focus());
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose("connection lost"));
+
+    expect(
+      screen.getByText("The connection to the server was lost.", { selector: ".recovery-row p" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/start them in tmux or screen/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+    expect(switcher).toHaveFocus();
+  });
+
+  it("announces resuming and return without moving focus", async () => {
+    useTouchPhone();
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockResolvedValue({
+      resume: true,
+      maxGraceMs: 120_000,
+    });
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      resume: vi.fn(),
+    });
+    render(<App />);
+    await submitConnect(userEvent.setup(), "first.example");
+    await screen.findByRole("button", { name: "Open terminals" });
+    const switcher = screen.getByRole("button", { name: "Open terminals" });
+    act(() => switcher.focus());
+    const onTransportStatus = vi.mocked(engine.connectSession).mock.calls[0]![0].onTransportStatus!;
+    act(() => onTransportStatus("reconnecting"));
+    expect(screen.getByText("Resuming")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show keyboard" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Escape" })).toHaveAttribute("aria-disabled", "true");
+    act(() => onTransportStatus("connected"));
+    expect(screen.getByText("Back in session.")).toHaveAttribute("aria-live", "polite");
+    expect(switcher).toHaveFocus();
+  });
+
+  it("keeps a touch tab after the shell exits and shows the server cause", async () => {
+    useTouchPhone();
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    await submitConnect(userEvent.setup(), "first.example");
+    await screen.findByRole("button", { name: "Open terminals" });
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose(""));
+
+    expect(screen.getByText("The server closed the connection.")).toBeInTheDocument();
+    expect(screen.queryByText(/start them in tmux or screen/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open terminals" })).toHaveTextContent(
+      "Disconnected",
+    );
+    expect(screen.getByText("Terminal for admin@first.example:22 disconnected.")).toHaveAttribute(
+      "aria-live",
+      "polite",
+    );
+  });
+
+  it("closes the terminal from the recovery row", async () => {
+    useTouchPhone();
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    const user = userEvent.setup();
+    await submitConnect(user, "first.example");
+    await screen.findByRole("button", { name: "Open terminals" });
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose("connection lost"));
+
+    await user.click(screen.getByRole("button", { name: "Close terminal" }));
+    expect(screen.queryByRole("button", { name: "Open terminals" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^host$/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
+  });
+
+  it("opens the connect form from Reconnect and keeps the closed tab", async () => {
+    useTouchPhone();
+    vi.mocked(engine.connectSession).mockResolvedValue({
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    });
+    render(<App />);
+    const user = userEvent.setup();
+    await submitConnect(user, "first.example");
+    await screen.findByRole("button", { name: "Open terminals" });
+    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose("connection lost"));
+
+    await user.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(screen.getByLabelText(/^host$/i)).toBeInTheDocument();
+    expect(screen.getByText("first.example")).toBeInTheDocument();
   });
 
   it("focuses a selected terminal when its controls register later", async () => {
@@ -290,6 +923,166 @@ describe("App", () => {
     );
     expect(sentBytes(first)).toBe("\u001b");
     expect(sentBytes(second)).toBe("\u001b");
+  });
+
+  describe("touch key bar keys", () => {
+    beforeEach(() => usePointer("coarse"));
+
+    async function connectWithKeys(settings: Record<string, unknown> = {}) {
+      localStorage.setItem("terminalSettings", JSON.stringify(settings));
+      const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+      vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+      render(<App />);
+      const user = userEvent.setup();
+      await connect(user, "keys.example");
+      const bar = screen.getByRole("toolbar", { name: "Terminal keys" });
+      return { handle, user, bar };
+    }
+
+    it("sends ESC [ Z for Shift Tab", async () => {
+      const { handle, user, bar } = await connectWithKeys();
+      await user.click(within(bar).getByRole("button", { name: "Shift Tab" }));
+      expect(sentBytes(handle)).toBe("\u001b[Z");
+    });
+
+    it("lays out keys in the saved order, modifiers as ordinary items", async () => {
+      const { bar } = await connectWithKeys({ keyBarKeys: ["tab", "ctrl", "esc"] });
+      const names = within(bar)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+      expect(names).toEqual(["Show keyboard", "Tab", "ctrl", "Escape", "More keys"]);
+    });
+
+    describe("More keys panel", () => {
+      let resizeCallbacks: (() => void)[] = [];
+      let rowWidth = 258;
+
+      beforeEach(() => {
+        resizeCallbacks = [];
+        rowWidth = 258;
+        vi.stubGlobal(
+          "ResizeObserver",
+          class {
+            constructor(callback: () => void) {
+              resizeCallbacks.push(callback);
+            }
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+          },
+        );
+        vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          return this.classList.contains("key-bar__keys") ? rowWidth : 0;
+        });
+      });
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      });
+
+      const rowNames = (bar: HTMLElement) =>
+        within(within(bar).getByTestId("key-bar-row"))
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+
+      it("shows only the keys that fit between Keyboard and More keys", async () => {
+        const { bar } = await connectWithKeys();
+        // 258px holds five 44px keys with 4px gaps.
+        expect(rowNames(bar)).toHaveLength(5);
+        expect(rowNames(bar).slice(0, 2)).toEqual(["ctrl", "Escape"]);
+        expect(within(bar).getByRole("button", { name: "More keys" })).toBeInTheDocument();
+      });
+
+      it("shows four keys at 320px and refits when the width changes", async () => {
+        const { bar } = await connectWithKeys();
+        rowWidth = 188;
+        act(() => resizeCallbacks.forEach((callback) => callback()));
+        expect(rowNames(bar)).toHaveLength(4);
+      });
+
+      it("opens a labelled group that holds the keys that did not fit, and keeps it open for a key", async () => {
+        const { handle, user, bar } = await connectWithKeys();
+        const more = within(bar).getByRole("button", { name: "More keys" });
+        expect(more).toHaveAttribute("aria-expanded", "false");
+        terminalBlur.mockClear();
+        await user.click(more);
+        expect(terminalBlur).toHaveBeenCalled();
+        expect(more).toHaveAttribute("aria-expanded", "true");
+        const panel = screen.getByRole("group", { name: "More keys" });
+        expect(more).toHaveAttribute("aria-controls", panel.id);
+        expect(within(panel).queryByRole("button", { name: "ctrl" })).not.toBeInTheDocument();
+        await user.click(within(panel).getByRole("button", { name: "Backspace" }));
+        expect(sentBytes(handle)).toBe("\x7f");
+        expect(screen.getByRole("group", { name: "More keys" })).toBeInTheDocument();
+      });
+
+      it("closes on More keys, and Keyboard closes it and raises the keyboard", async () => {
+        const { user, bar } = await connectWithKeys();
+        const more = within(bar).getByRole("button", { name: "More keys" });
+        await user.click(more);
+        await user.click(more);
+        expect(screen.queryByRole("group", { name: "More keys" })).not.toBeInTheDocument();
+        await user.click(more);
+        terminalFocus.mockClear();
+        await user.click(within(bar).getByRole("button", { name: "Show keyboard" }));
+        expect(screen.queryByRole("group", { name: "More keys" })).not.toBeInTheDocument();
+        expect(terminalFocus).toHaveBeenCalled();
+      });
+
+      it("closes on Files and on Escape, and Escape returns focus to More keys", async () => {
+        const { user, bar } = await connectWithKeys();
+        const more = within(bar).getByRole("button", { name: "More keys" });
+        await user.click(more);
+        await user.keyboard("{Escape}");
+        expect(screen.queryByRole("group", { name: "More keys" })).not.toBeInTheDocument();
+        expect(more).toHaveFocus();
+        await user.click(more);
+        await user.click(screen.getByRole("button", { name: "Files" }));
+        expect(screen.queryByRole("group", { name: "More keys" })).not.toBeInTheDocument();
+      });
+
+      it("says where to add keys when the list is empty", async () => {
+        const { user, bar } = await connectWithKeys({ keyBarKeys: [] });
+        await user.click(within(bar).getByRole("button", { name: "More keys" }));
+        expect(screen.getByText("No keys. Add keys in Settings, Key bar.")).toBeInTheDocument();
+      });
+    });
+
+    it("keeps Ctrl sticky: armed once, then locked", async () => {
+      const { user, bar } = await connectWithKeys();
+      const ctrl = within(bar).getByRole("button", { name: "ctrl" });
+      await user.click(ctrl);
+      expect(ctrl).toHaveClass("key-bar__key--once");
+      await user.click(ctrl);
+      expect(ctrl).toHaveClass("key-bar__key--locked");
+      await user.click(ctrl);
+      expect(ctrl).toHaveClass("key-bar__key--off");
+    });
+
+    it("changes the text size, persists it, and disables the key at the limit", async () => {
+      const { user, bar } = await connectWithKeys({ fontSize: 31 });
+      const larger = within(bar).getByRole("button", { name: "Text larger" });
+      await user.click(larger);
+      expect(JSON.parse(localStorage.getItem("terminalSettings")!).fontSize).toBe(32);
+      expect(screen.getByText("Text size 32 px, the largest.")).toBeInTheDocument();
+      expect(larger).toHaveAttribute("aria-disabled", "true");
+      await user.click(larger);
+      expect(JSON.parse(localStorage.getItem("terminalSettings")!).fontSize).toBe(32);
+
+      const smaller = within(bar).getByRole("button", { name: "Text smaller" });
+      expect(smaller).toHaveAttribute("aria-disabled", "false");
+      await user.click(smaller);
+      expect(screen.getByText("Text size 31 px.")).toBeInTheDocument();
+    });
+
+    it("announces the smallest size", async () => {
+      const { user, bar } = await connectWithKeys({ fontSize: 9 });
+      await user.click(within(bar).getByRole("button", { name: "Text smaller" }));
+      expect(screen.getByText("Text size 8 px, the smallest.")).toBeInTheDocument();
+    });
   });
 
   it("keeps sibling tabs open when one connection drops", async () => {
@@ -514,6 +1307,146 @@ describe("App", () => {
 
     act(() => window.dispatchEvent(new Event("pagehide")));
     expect(first.close).toHaveBeenCalledOnce();
+  });
+
+  it("detaches v2 on pagehide and resumes on pageshow, visible, and online", async () => {
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockResolvedValue({
+      resume: true,
+      maxGraceMs: 3_600_000,
+    });
+    const handle: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      detach: vi.fn(),
+      resume: vi.fn(),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+    expect(vi.mocked(engine.connectSession).mock.calls[0]?.[0].keepAliveMs).toBe(120_000);
+
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(handle.detach).not.toHaveBeenCalled();
+    expect(handle.resume).not.toHaveBeenCalled();
+    visibility.mockRestore();
+
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(handle.detach).toHaveBeenCalledOnce();
+    expect(handle.close).not.toHaveBeenCalled();
+    act(() => window.dispatchEvent(new Event("pageshow")));
+    act(() => window.dispatchEvent(new Event("online")));
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(handle.resume).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps Off on v1 and closes it on pagehide", async () => {
+    localStorage.setItem("terminalSettings", JSON.stringify({ keepAlive: "off" }));
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockResolvedValue({
+      resume: true,
+      maxGraceMs: 3_600_000,
+    });
+    const handle: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      detach: vi.fn(),
+      resume: vi.fn(),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+    expect(vi.mocked(engine.connectSession).mock.calls[0]?.[0].keepAliveMs).toBeUndefined();
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(handle.close).toHaveBeenCalledOnce();
+    expect(handle.detach).not.toHaveBeenCalled();
+  });
+
+  it("retries unknown capabilities at connect and uses v1 if still unknown", async () => {
+    const fetchCapabilities = vi.mocked(relayCapabilities.fetchRelayCapabilities);
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+    expect(fetchCapabilities).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(engine.connectSession).mock.calls[0]?.[0].keepAliveMs).toBeUndefined();
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(handle.close).toHaveBeenCalledOnce();
+  });
+
+  it("uses v2 when an unknown capability check succeeds at connect", async () => {
+    vi.mocked(relayCapabilities.fetchRelayCapabilities)
+      .mockResolvedValueOnce("unknown")
+      .mockResolvedValueOnce({ resume: true, maxGraceMs: 3_600_000 });
+    const handle: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      detach: vi.fn(),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+    expect(vi.mocked(engine.connectSession).mock.calls[0]?.[0].keepAliveMs).toBe(120_000);
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(handle.detach).toHaveBeenCalledOnce();
+  });
+
+  it("uses v1 when the relay reports resume disabled", async () => {
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockResolvedValue({
+      resume: false,
+      maxGraceMs: 0,
+    });
+    const handle: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      detach: vi.fn(),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+    render(<App />);
+    await connect(userEvent.setup(), "first.example");
+    expect(vi.mocked(engine.connectSession).mock.calls[0]?.[0].keepAliveMs).toBeUndefined();
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(handle.close).toHaveBeenCalledOnce();
+    expect(handle.detach).not.toHaveBeenCalled();
+  });
+
+  it("keeps two v2 tabs isolated and explicitly closes only the chosen tab", async () => {
+    vi.mocked(relayCapabilities.fetchRelayCapabilities).mockResolvedValue({
+      resume: true,
+      maxGraceMs: 3_600_000,
+    });
+    const first: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      detach: vi.fn(),
+      resume: vi.fn(),
+    };
+    const second: engine.SshHandle = {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+      detach: vi.fn(),
+      resume: vi.fn(),
+    };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "first.example");
+    await user.click(screen.getByRole("button", { name: "New terminal" }));
+    await connect(user, "second.example");
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(second.close).toHaveBeenCalledOnce();
+    expect(first.close).not.toHaveBeenCalled();
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    expect(first.detach).toHaveBeenCalledOnce();
+    expect(second.detach).not.toHaveBeenCalled();
+    act(() => window.dispatchEvent(new Event("pageshow")));
+    expect(first.resume).toHaveBeenCalledOnce();
+    expect(second.resume).not.toHaveBeenCalled();
   });
 
   it("renders the connect form", () => {
@@ -762,6 +1695,8 @@ describe("App", () => {
     const { unmount } = render(<App />);
     const user = userEvent.setup();
 
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
     await user.selectOptions(screen.getByLabelText(/font family/i), '"JetBrains Mono", monospace');
     await user.selectOptions(screen.getByLabelText(/color scheme/i), "Nord");
     await user.selectOptions(screen.getByLabelText(/font size/i), "18");
@@ -774,6 +1709,7 @@ describe("App", () => {
 
     unmount();
     render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByLabelText(/font family/i)).toHaveValue('"JetBrains Mono", monospace');
     expect(screen.getByLabelText(/color scheme/i)).toHaveValue("Nord");
     expect(screen.getByLabelText(/font size/i)).toHaveValue("18");
@@ -805,13 +1741,23 @@ describe("App", () => {
     await user.click(actions);
     expect(actions).toHaveAttribute("aria-expanded", "true");
     const panel = screen.getByRole("group", { name: "Actions" });
-    for (const name of ["Files", "Disconnect", "Clipboard", "Appearance", "Help", "About"]) {
+    for (const name of ["Files", "Disconnect", "Clipboard", "Settings", "Help", "About"]) {
       expect(within(panel).getByRole("button", { name })).toBeInTheDocument();
     }
+    expect(
+      Array.from(panel.children).map((item) =>
+        (item.matches("button")
+          ? item
+          : item.querySelector("summary, button")
+        )?.textContent?.trim(),
+      ),
+    ).toEqual(["Files", "Disconnect", "Clipboard", "Settings", "Help", "About"]);
 
-    await user.keyboard("{Escape}");
+    await user.click(within(panel).getByRole("button", { name: "Settings" }));
     expect(screen.queryByRole("group", { name: "Actions" })).not.toBeInTheDocument();
-    expect(actions).toHaveFocus();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(actions).toHaveFocus());
 
     await user.click(actions);
     await user.click(
@@ -1010,7 +1956,7 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("ignores invalid persisted terminal settings", () => {
+  it("ignores invalid persisted terminal settings", async () => {
     localStorage.setItem(
       "terminalSettings",
       JSON.stringify({
@@ -1022,6 +1968,7 @@ describe("App", () => {
 
     render(<App />);
 
+    await userEvent.setup().click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByLabelText(/font size/i)).toHaveValue("14");
     expect(screen.getByLabelText(/font family/i)).toHaveValue(DEFAULT_FONT_FAMILY);
     expect(screen.getByLabelText(/color scheme/i)).toHaveValue(DEFAULT_THEME_NAME);

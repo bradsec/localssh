@@ -30,24 +30,28 @@ export interface TerminalKey {
   sequence?: string;
   /** Cursor key to send instead, resolved against the terminal's mode. */
   cursor?: CursorKey;
+  /** Sticky modifier this key arms instead of sending bytes. */
+  modifier?: ModifierName;
+  /** Terminal text size change this key makes instead of sending bytes. */
+  action?: "text-smaller" | "text-larger";
 }
 
 /**
- * The bar's keys, in order. History recall leads: cursor up and Enter are all it
- * takes to run a previous command, and with those on the bar that can be done
- * without the on-screen keyboard open at all. Esc, Tab and the Ctrl shortcuts
- * that interrupt, end input and suspend a job follow, and the punctuation at the
- * end is buried behind a shift on the iOS keyboard but common in a command line.
+ * Every key the bar can carry. The order the bar shows them in is a user
+ * setting, see DEFAULT_KEY_ORDER and resolveKeyOrder.
  */
 export const KEY_BAR_KEYS: readonly TerminalKey[] = [
+  { id: "ctrl", label: "ctrl", modifier: "ctrl" },
+  { id: "alt", label: "alt", modifier: "alt" },
+  { id: "esc", label: "esc", ariaLabel: "Escape", sequence: "\x1b" },
+  { id: "tab", label: "tab", ariaLabel: "Tab", sequence: "\t" },
+  { id: "shift-tab", label: "⇧tab", ariaLabel: "Shift Tab", sequence: "\x1b[Z" },
   { id: "up", label: "↑", ariaLabel: "Up arrow", cursor: "up" },
   { id: "down", label: "↓", ariaLabel: "Down arrow", cursor: "down" },
   { id: "enter", label: "⏎", ariaLabel: "Enter", sequence: "\r" },
   // DEL rather than BS: it is what a terminal's erase character is set to
   // almost everywhere, and what the Backspace key on a desktop sends.
   { id: "backspace", label: "⌫", ariaLabel: "Backspace", sequence: "\x7f" },
-  { id: "esc", label: "esc", ariaLabel: "Escape", sequence: "\x1b" },
-  { id: "tab", label: "tab", ariaLabel: "Tab", sequence: "\t" },
   { id: "ctrl-c", label: "^C", ariaLabel: "Control C, interrupt", sequence: "\x03" },
   { id: "left", label: "←", ariaLabel: "Left arrow", cursor: "left" },
   { id: "right", label: "→", ariaLabel: "Right arrow", cursor: "right" },
@@ -59,7 +63,57 @@ export const KEY_BAR_KEYS: readonly TerminalKey[] = [
   { id: "slash", label: "/", ariaLabel: "Slash", sequence: "/" },
   { id: "tilde", label: "~", ariaLabel: "Tilde", sequence: "~" },
   { id: "dash", label: "-", ariaLabel: "Hyphen", sequence: "-" },
+  { id: "text-smaller", label: "A-", ariaLabel: "Text smaller", action: "text-smaller" },
+  { id: "text-larger", label: "A+", ariaLabel: "Text larger", action: "text-larger" },
 ];
+
+/**
+ * The default order. TUI and coding-agent prompts lead (ctrl, esc, tab,
+ * shift-tab), history recall follows, and the punctuation that is buried behind
+ * a shift on the iOS keyboard comes last, before the text size keys.
+ */
+export const DEFAULT_KEY_ORDER: readonly string[] = [
+  "ctrl",
+  "esc",
+  "tab",
+  "shift-tab",
+  "up",
+  "down",
+  "enter",
+  "backspace",
+  "alt",
+  "ctrl-c",
+  "left",
+  "right",
+  "ctrl-d",
+  "ctrl-z",
+  "home",
+  "end",
+  "pipe",
+  "slash",
+  "tilde",
+  "dash",
+  "text-smaller",
+  "text-larger",
+];
+
+/**
+ * Cleans a stored key order: unknown ids and duplicates are dropped, and an
+ * empty result stays empty because the user may have removed every key. Anything
+ * other than an array gives the default order.
+ */
+export function resolveKeyOrder(ids: unknown): string[] {
+  if (!Array.isArray(ids)) return [...DEFAULT_KEY_ORDER];
+  const known = new Set(KEY_BAR_KEYS.map((key) => key.id));
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== "string" || !known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    order.push(id);
+  }
+  return order;
+}
 
 /** Advances a modifier one step through off, armed for one key, and locked. */
 export function cycleModifier(mode: ModifierMode): ModifierMode {

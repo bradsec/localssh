@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { SavedHosts } from "./SavedHosts.js";
 import type { VaultApi } from "../vault/useVault.js";
 import type { SavedEntry } from "../vault/vaultEngine.js";
@@ -20,6 +20,8 @@ export interface ConnectDialogProps {
   disabled: boolean;
   /** Why the last connection failed, shown under the connect action. */
   error?: ReactNode;
+  /** Address of a closed terminal being reconnected. Credentials are never prefilled. */
+  initialValues?: { host: string; port: number; username: string };
 }
 
 /**
@@ -48,11 +50,17 @@ function migrateLastHost(): { host: string; port: number } | null {
   }
 }
 
-export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDialogProps) {
+export function ConnectDialog({
+  vault,
+  onConnect,
+  disabled,
+  error,
+  initialValues,
+}: ConnectDialogProps) {
   const [migrated] = useState(migrateLastHost);
-  const [host, setHost] = useState(migrated?.host ?? "");
-  const [port, setPort] = useState(String(migrated?.port ?? 22));
-  const [username, setUsername] = useState("");
+  const [host, setHost] = useState(initialValues?.host ?? migrated?.host ?? "");
+  const [port, setPort] = useState(String(initialValues?.port ?? migrated?.port ?? 22));
+  const [username, setUsername] = useState(initialValues?.username ?? "");
   const [password, setPassword] = useState("");
   const [method, setMethod] = useState<"password" | "key">("password");
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -63,6 +71,13 @@ export function ConnectDialog({ vault, onConnect, disabled, error }: ConnectDial
   const keyFileRef = useRef<HTMLInputElement>(null);
   const usernameRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+
+  // A reconnect lands on the first credential still missing (S-17). Mount only:
+  // the caller remounts the form for each reconnect.
+  const [initialFocus] = useState(() =>
+    initialValues ? (initialValues.username ? passwordRef : usernameRef) : null,
+  );
+  useEffect(() => initialFocus?.current?.focus(), [initialFocus]);
 
   const storesAPassword = vault.entries.some((entry) => entry.hasPassword);
 

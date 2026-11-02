@@ -10,6 +10,7 @@ import {
 function fakeViewport(height: number) {
   const listeners = new Map<string, Set<() => void>>();
   const viewport: ViewportLike = {
+    width: 390,
     height,
     offsetTop: 0,
     addEventListener: (type, listener) => {
@@ -96,6 +97,19 @@ describe("trackViewportHeight", () => {
 
     vi.advanceTimersByTime(VIEWPORT_SAMPLE_INTERVAL_MS);
     expect(root.style.getPropertyValue(VIEWPORT_HEIGHT_PROPERTY)).toBe("361px");
+  });
+
+  it("samples visual width even when no resize event arrives", () => {
+    vi.useFakeTimers();
+    const root = document.createElement("div");
+    const { viewport } = fakeViewport(390);
+    const widths: number[] = [];
+    const stop = trackViewportHeight(viewport, root, () => widths.push(viewport.width));
+
+    viewport.width = 844;
+    vi.advanceTimersByTime(VIEWPORT_SAMPLE_INTERVAL_MS);
+    expect(widths).toEqual([390, 844]);
+    stop();
   });
 
   it("stops sampling once tracking has stopped", () => {

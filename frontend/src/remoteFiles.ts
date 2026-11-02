@@ -1,4 +1,5 @@
 // Helpers for the file panel that do not render anything.
+import { SEGMENT_PREFIX, listRecords, purgeOld } from "./downloadStore.js";
 
 export const DOWNLOAD_PREFIX = "localssh-download-";
 /** How long a finished download's browser copy stays available to save. */
@@ -30,13 +31,33 @@ export async function originDirectory(): Promise<FileSystemDirectoryHandle | nul
 /**
  * Removes this app's download copies older than DOWNLOAD_KEEP_MS, left behind
  * by a reload or closed tab. Newer ones may belong to another open window.
+ * Also purges expired resumable downloads and removes segment files that no
+ * record claims; segments of a live record stay for a later resume.
  */
 export async function sweepDownloads(now = Date.now()): Promise<void> {
   const directory = await originDirectory();
   if (!directory) return;
+  // Without the records, no segment can be shown to be an orphan.
+  let liveSegmentPrefixes: string[] | null = null;
+  try {
+    await purgeOld(directory, now);
+    liveSegmentPrefixes = (await listRecords()).map((record) => `${SEGMENT_PREFIX}${record.id}-`);
+  } catch (error) {
+    console.error(error);
+  }
   const names: string[] = [];
+  const orphans: string[] = [];
   for await (const name of (directory as unknown as { keys(): AsyncIterable<string> }).keys()) {
     if (name.startsWith(DOWNLOAD_PREFIX)) names.push(name);
+    else if (
+      liveSegmentPrefixes &&
+      name.startsWith(SEGMENT_PREFIX) &&
+      !liveSegmentPrefixes.some((prefix) => name.startsWith(prefix))
+    )
+      orphans.push(name);
+  }
+  for (const name of orphans) {
+    await directory.removeEntry(name).catch(console.error);
   }
   for (const name of names) {
     try {

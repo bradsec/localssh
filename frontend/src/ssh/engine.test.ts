@@ -5,6 +5,7 @@ import {
   guardSftp,
   instantiateEngine,
   openFiles,
+  REMOTE_FILE_CHANGED,
 } from "./engine.js";
 import type { SftpHandle } from "./engine.js";
 import * as engineModule from "./engine.js";
@@ -35,6 +36,22 @@ const base = {
 };
 
 describe("connectSession", () => {
+  it("passes the chosen grace and transport status details to WASM", async () => {
+    const onTransportStatus = vi.fn();
+    await connectSession({
+      ...base,
+      password: { kind: "typed", value: "secret" },
+      keepAliveMs: null,
+      onTransportStatus,
+    });
+    const callbacks = sshConnect.mock.calls[0]?.[5];
+    expect(callbacks.keepAliveMs).toBeNull();
+    callbacks.onTransportStatus("connected", { grantedGraceMs: null, capGraceMs: null });
+    expect(onTransportStatus).toHaveBeenCalledWith("connected", {
+      grantedGraceMs: null,
+      capGraceMs: null,
+    });
+  });
   it("passes a key to WASM and wipes it after success", async () => {
     const privateKey = new Uint8Array([1, 2, 3]);
     await connectSession({ ...base, password: { kind: "key", privateKey, passphrase: "secret" } });
@@ -174,6 +191,28 @@ describe("guardSftp", () => {
     await expect(files.upload("a", new File([], "a"), false, () => {})).rejects.toBe(
       "remote file exists",
     );
+  });
+
+  it("passes download resume options to the engine", async () => {
+    const download = vi.fn().mockResolvedValue({ grew: false, size: 9 });
+    const files = guardSftp({ ...released(), download });
+    const onChunk = async () => {};
+    const onProgress = () => {};
+    const opts = {
+      offset: 4,
+      expectSize: 9,
+      expectMtime: 1000,
+      tail: new Uint8Array([1, 2, 3, 4]),
+      onStart: () => {},
+    };
+    await expect(files.download("a", onChunk, onProgress, opts)).resolves.toEqual({
+      grew: false,
+      size: 9,
+    });
+    expect(download).toHaveBeenCalledWith("a", onChunk, onProgress, opts);
+    await files.download("a", onChunk, onProgress);
+    expect(download).toHaveBeenLastCalledWith("a", onChunk, onProgress);
+    expect(REMOTE_FILE_CHANGED).toBe("remote file changed");
   });
 
   it("rejects opening files on a released session handle", async () => {

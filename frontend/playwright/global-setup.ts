@@ -109,6 +109,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const frontendDir = path.resolve(import.meta.dirname, "..");
   const engineDir = path.resolve(frontendDir, "../engine");
   const relayDir = path.resolve(frontendDir, "../relay");
+  const relayPort = process.env.E2E_RELAY_PORT ?? "8787";
   const previousSshdAddress = process.env.E2E_SSHD_ADDR;
   const keyDir = mkdtempSync(path.join(tmpdir(), "localssh-e2e-key-"));
   const sftpRoot = path.join(keyDir, "sftp");
@@ -168,7 +169,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
     const requireFromRelay = createRequire(path.join(relayDir, "package.json"));
     const tsxCli = requireFromRelay.resolve("tsx/cli");
-    relay = spawn(process.execPath, [tsxCli, "scripts/run-local-relay.ts", "8787"], {
+    relay = spawn(process.execPath, [tsxCli, "scripts/run-local-relay.ts", relayPort], {
       cwd: relayDir,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -177,7 +178,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       relay,
       relayStderr,
       "local relay",
-      (line) => line === "local relay listening on 8787",
+      (line) => line === `local relay listening on ${relayPort}`,
     );
 
     return cleanup;

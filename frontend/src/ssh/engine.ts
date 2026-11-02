@@ -2,6 +2,8 @@ export interface SshHandle {
   write(chunk: Uint8Array): string | null;
   resize(cols: number, rows: number): void;
   close(): void;
+  detach?(): void;
+  resume?(): void;
   openFiles?(): Promise<SftpHandle>;
 }
 
@@ -37,6 +39,23 @@ export interface DownloadResult {
 /** The text the engine rejects with when an upload without overwrite finds its target. */
 export const REMOTE_FILE_EXISTS = "remote file exists";
 
+/** The text the engine rejects with when a resumed download finds the remote file changed. */
+export const REMOTE_FILE_CHANGED = "remote file changed";
+
+/**
+ * Resumes a download. Above offset 0 the engine requires the remote size and
+ * mtime (Unix ms, as listings report) to match and the remote bytes just
+ * before offset to equal tail, else it rejects with REMOTE_FILE_CHANGED.
+ */
+export interface DownloadOptions {
+  offset?: number;
+  expectSize?: number;
+  expectMtime?: number;
+  tail?: Uint8Array;
+  /** Called with the remote size and mtime before the first chunk. */
+  onStart?: (info: { size: number; mtime: number }) => void;
+}
+
 export interface SftpHandle {
   list(path: string): Promise<RemoteListing>;
   upload(
@@ -49,6 +68,7 @@ export interface SftpHandle {
     path: string,
     onChunk: (chunk: Uint8Array) => Promise<void>,
     onProgress: (percent: number) => void,
+    opts?: DownloadOptions,
   ): Promise<DownloadResult | undefined>;
   cancel(): void;
   close(): void;
@@ -83,7 +103,13 @@ export function guardSftp(raw: SftpHandle): SftpHandle {
     },
     upload: (path, file, overwrite, onProgress) =>
       settled(raw.upload(path, file, overwrite, onProgress)),
-    download: (path, onChunk, onProgress) => settled(raw.download(path, onChunk, onProgress)),
+    // Without opts the engine call keeps its original three arguments.
+    download: (path, onChunk, onProgress, opts) =>
+      settled(
+        opts === undefined
+          ? raw.download(path, onChunk, onProgress)
+          : raw.download(path, onChunk, onProgress, opts),
+      ),
     cancel: () => raw.cancel(),
     close: () => raw.close(),
   };
@@ -112,6 +138,11 @@ declare global {
         onData: (chunk: Uint8Array) => void;
         /** Gets "" for a clean end, or why the connection was lost. */
         onClose: (reason?: string) => void;
+        keepAliveMs?: number | null;
+        onTransportStatus?: (
+          status: "connected" | "reconnecting" | "expired",
+          info?: { grantedGraceMs: number | null; capGraceMs: number | null },
+        ) => void;
       },
     ) => Promise<SshHandle>;
   }
@@ -202,6 +233,11 @@ export interface ConnectOptions {
   onData: (chunk: Uint8Array) => void;
   /** `reason` is "" when the shell ended or the page closed the session. */
   onClose: (reason: string) => void;
+  keepAliveMs?: number | null;
+  onTransportStatus?: (
+    status: "connected" | "reconnecting" | "expired",
+    info?: { grantedGraceMs: number | null; capGraceMs: number | null },
+  ) => void;
 }
 
 export async function connectSession(options: ConnectOptions): Promise<SshHandle> {
@@ -227,6 +263,8 @@ export async function connectSession(options: ConnectOptions): Promise<SshHandle
         },
         onData: options.onData,
         onClose: (reason) => options.onClose(reason ?? ""),
+        keepAliveMs: options.keepAliveMs,
+        onTransportStatus: options.onTransportStatus,
       },
     );
     if (options.password.kind === "key") options.password.privateKey.fill(0);

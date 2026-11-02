@@ -1,26 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// A phone, where selecting text is a long press and copying it means reaching
-// the Clipboard menu, which dismisses the on-screen keyboard on the way.
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-
-/**
- * Long-presses at one point and drags to another with real touch input, so the
- * page sees the pointer stream a phone produces.
- */
-async function longPressDrag(page: Page, from: Point, to: Point) {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
-  await page.waitForTimeout(700);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [to] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.detach();
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
 
 async function connect(page: Page) {
   const sshdAddress = process.env.E2E_SSHD_ADDR;
@@ -37,56 +17,49 @@ async function connect(page: Page) {
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 }
 
-test("a touch selection survives the keyboard closing and can be copied", async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("Select text shows frozen DOM output and blocks shell input", async ({ page }) => {
   await connect(page);
-
+  await page
+    .locator(".xterm-helper-textarea")
+    .evaluate((textarea: HTMLTextAreaElement) => textarea.focus());
   await page.keyboard.type("selectme");
-  await expect(page.locator(".xterm-rows")).toContainText("selectme", { timeout: 5_000 });
+  await expect(page.locator(".xterm-rows")).toContainText("selectme");
 
-  // Long press on the first row, then drag along it.
-  const screen = (await page.locator(".xterm-screen").boundingBox())!;
-  const rowY = screen.y + 5;
-  await longPressDrag(
-    page,
-    { x: screen.x + 2, y: rowY },
-    { x: screen.x + screen.width / 2, y: rowY },
-  );
+  await page.getByRole("button", { name: "Select text" }).tap();
+  const view = page.getByRole("dialog", { name: "Select text" });
+  await expect(view.locator("pre")).toContainText("selectme");
+  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
 
-  // At phone width the session controls sit behind Actions.
-  await page.getByRole("button", { name: "Actions" }).tap();
-  const clipboard = page.getByRole("button", { name: /^clipboard/i });
-  await expect(clipboard).toHaveAccessibleName(/selection ready to copy/i);
+  const selected = await view.locator("pre").evaluate((pre) => {
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return selection.toString();
+  });
+  expect(selected).toContain("selectme");
 
-  // The keyboard closing grows the visual viewport, which changes the row count.
-  await page.setViewportSize({ width: 390, height: 600 });
-  await page.waitForTimeout(300);
-  await expect(clipboard).toHaveAccessibleName(/selection ready to copy/i);
-
-  await clipboard.tap();
-  await page.getByRole("button", { name: /^copy selection$/i }).tap();
-  await expect(page.getByText("Copied the selection.")).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("selectme");
+  await page.keyboard.type("must-not-reach-shell");
+  await expect(view.locator("pre")).not.toContainText("must-not-reach-shell");
+  await page.getByRole("button", { name: "Close text view" }).tap();
+  await expect(view).toHaveCount(0);
+  await expect(page.locator(".xterm-rows")).not.toContainText("must-not-reach-shell");
 });
 
-test("a touch the browser cancels is not taken as a tap", async ({ page }) => {
+test("stationary long press opens the text view", async ({ page }) => {
   await connect(page);
-  const terminalInput = page.locator(".xterm-helper-textarea");
-  await terminalInput.blur();
-  await expect(terminalInput).not.toBeFocused();
-
-  const screen = (await page.locator(".xterm-screen").boundingBox())!;
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: screen.x + 20, y: screen.y + 20 }],
+  await page.locator(".xterm-screen").evaluate((screen) => {
+    const bounds = screen.getBoundingClientRect();
+    screen.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerId: 1,
+        pointerType: "touch",
+        clientX: bounds.left + 8,
+        clientY: bounds.top + 8,
+      }),
+    );
   });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
-  await cdp.detach();
-
-  await page.waitForTimeout(300);
-  await expect(terminalInput).not.toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Select text" })).toBeVisible();
 });

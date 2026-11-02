@@ -3,9 +3,11 @@ import {
   applyModifiers,
   controlCode,
   cycleModifier,
+  DEFAULT_KEY_ORDER,
   keySequence,
   KEY_BAR_KEYS,
   NO_MODIFIERS,
+  resolveKeyOrder,
   spendModifiers,
   type ModifierState,
 } from "./terminalKeys.js";
@@ -56,10 +58,75 @@ describe("keySequence", () => {
     expect(keySequence(up, true)).toBe("\x1bOA");
   });
 
-  it("gives every key on the bar something to send", () => {
+  it("gives every byte key on the bar something to send", () => {
     for (const key of KEY_BAR_KEYS) {
+      if (key.modifier || key.action) continue;
       expect(keySequence(key, false)).not.toBe("");
     }
+  });
+
+  it("sends ESC [ Z for Shift Tab, spoken as Shift Tab", () => {
+    const key = KEY_BAR_KEYS.find((entry) => entry.id === "shift-tab");
+    expect(key && keySequence(key, false)).toBe("\x1b[Z");
+    expect(key?.ariaLabel).toBe("Shift Tab");
+  });
+
+  it("carries modifiers and text size as ordinary items that send no bytes", () => {
+    const byId = (id: string) => KEY_BAR_KEYS.find((key) => key.id === id);
+    expect(byId("ctrl")?.modifier).toBe("ctrl");
+    expect(byId("alt")?.modifier).toBe("alt");
+    expect(byId("text-smaller")).toMatchObject({
+      action: "text-smaller",
+      ariaLabel: "Text smaller",
+    });
+    expect(byId("text-larger")).toMatchObject({ action: "text-larger", ariaLabel: "Text larger" });
+    expect(keySequence(byId("ctrl")!, false)).toBe("");
+  });
+});
+
+describe("DEFAULT_KEY_ORDER", () => {
+  it("follows the designed order and names every key once", () => {
+    expect(DEFAULT_KEY_ORDER).toEqual([
+      "ctrl",
+      "esc",
+      "tab",
+      "shift-tab",
+      "up",
+      "down",
+      "enter",
+      "backspace",
+      "alt",
+      "ctrl-c",
+      "left",
+      "right",
+      "ctrl-d",
+      "ctrl-z",
+      "home",
+      "end",
+      "pipe",
+      "slash",
+      "tilde",
+      "dash",
+      "text-smaller",
+      "text-larger",
+    ]);
+    expect([...DEFAULT_KEY_ORDER].sort()).toEqual(KEY_BAR_KEYS.map((key) => key.id).sort());
+  });
+});
+
+describe("resolveKeyOrder", () => {
+  it("falls back to the default for anything but an array", () => {
+    expect(resolveKeyOrder(undefined)).toEqual(DEFAULT_KEY_ORDER);
+    expect(resolveKeyOrder("esc")).toEqual(DEFAULT_KEY_ORDER);
+  });
+
+  it("drops unknown ids, non-strings and duplicates, keeping order", () => {
+    expect(resolveKeyOrder(["tab", "bogus", 4, "esc", "tab"])).toEqual(["tab", "esc"]);
+  });
+
+  it("keeps an empty list", () => {
+    expect(resolveKeyOrder([])).toEqual([]);
+    expect(resolveKeyOrder(["bogus"])).toEqual([]);
   });
 });
 

@@ -220,4 +220,37 @@ describe("ConnectDialog", () => {
 
     expect(screen.getByText(/allow browser storage to save hosts/i)).toBeInTheDocument();
   });
+
+  it("prefills host, port and user for a reconnect and focuses the password", () => {
+    render(
+      <ConnectDialog
+        vault={vaultApi({ status: "locked", entries: [] })}
+        onConnect={vi.fn()}
+        disabled={false}
+        initialValues={{ host: "pi.lan", port: 2222, username: "mark" }}
+      />,
+    );
+    expect(screen.getByLabelText(/^host$/i)).toHaveValue("pi.lan");
+    expect(screen.getByLabelText(/^port$/i)).toHaveValue(2222);
+    expect(screen.getByLabelText(/^username$/i)).toHaveValue("mark");
+    expect(screen.getByLabelText(/^password$/i)).toHaveValue("");
+    expect(screen.getByLabelText(/^password$/i)).toHaveFocus();
+  });
+
+  it("focuses the username when a reconnect has none", () => {
+    render(
+      <ConnectDialog
+        vault={vaultApi({ status: "locked", entries: [] })}
+        onConnect={vi.fn()}
+        disabled={false}
+        initialValues={{ host: "pi.lan", port: 22, username: "" }}
+      />,
+    );
+    expect(screen.getByLabelText(/^username$/i)).toHaveFocus();
+  });
+
+  it("does not move focus without initial values", () => {
+    render(<ConnectDialog vault={vaultApi()} onConnect={vi.fn()} disabled={false} />);
+    expect(document.body).toHaveFocus();
+  });
 });

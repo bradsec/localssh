@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Help, HelpProvider } from "./Help.js";
-import { FilePanel } from "./FilePanel.js";
+import { FilePanel, type FilePanelProps } from "./FilePanel.js";
 import { ToastProvider } from "./Toasts.js";
 import { displayName, sweepDownloads } from "../remoteFiles.js";
+import {
+  type DownloadRecord,
+  SEGMENT_BYTES,
+  TAIL_BYTES,
+  deleteRecord,
+  listRecords,
+  openSegmentedDownload,
+  segmentName,
+} from "../downloadStore.js";
 import type { RemoteFile, RemoteListing, SftpHandle, SshHandle } from "../ssh/engine.js";
 
 function listing(path: string, entries: RemoteFile[] = []): RemoteListing {
@@ -26,6 +35,7 @@ function renderPanel(
   files: SftpHandle,
   onClose = vi.fn(),
   openFiles = vi.fn().mockResolvedValue(files),
+  extra: Partial<FilePanelProps> = {},
 ) {
   const handle: SshHandle = {
     write: vi.fn(),
@@ -33,15 +43,30 @@ function renderPanel(
     close: vi.fn(),
     openFiles,
   };
-  const view = render(
+  const tree = (more: Partial<FilePanelProps>) => (
     <ToastProvider>
       <HelpProvider>
-        <FilePanel handle={handle} onClose={onClose} expanded={false} onExpand={() => {}} />
+        <FilePanel
+          handle={handle}
+          onClose={onClose}
+          expanded={false}
+          onExpand={() => {}}
+          transport="connected"
+          identity={{ host: "example.test", port: 22, username: "tester" }}
+          {...extra}
+          {...more}
+        />
         <Help />
       </HelpProvider>
-    </ToastProvider>,
+    </ToastProvider>
   );
-  return { ...view, onClose, user: userEvent.setup() };
+  const view = render(tree({}));
+  return {
+    ...view,
+    onClose,
+    user: userEvent.setup(),
+    setProps: (more: Partial<FilePanelProps>) => view.rerender(tree(more)),
+  };
 }
 
 /** An in-memory stand-in for the origin private file system root. */
@@ -96,15 +121,43 @@ const downloadOneChunk = vi.fn(
   },
 );
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Resumable download records live in IndexedDB across tests; start clean.
+  const noFiles = {
+    async *keys() {},
+    removeEntry: async () => {},
+  } as unknown as FileSystemDirectoryHandle;
+  for (const record of await listRecords()) await deleteRecord(noFiles, record.id);
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   URL.createObjectURL = vi.fn(() => "blob:test");
   URL.revokeObjectURL = vi.fn();
+  const held = new Set<string>();
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: {
+      request: vi.fn(
+        async (
+          name: string,
+          _options: unknown,
+          callback: (lock: Lock | null) => Promise<unknown>,
+        ) => {
+          if (held.has(name)) return callback(null);
+          held.add(name);
+          try {
+            return await callback({ name, mode: "exclusive" } as Lock);
+          } finally {
+            held.delete(name);
+          }
+        },
+      ),
+    },
+  });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   Reflect.deleteProperty(navigator, "storage");
+  Reflect.deleteProperty(navigator, "locks");
 });
 
 it("cancels an upload and shows an informational toast", async () => {
@@ -252,8 +305,10 @@ describe("browsing", () => {
         .mockResolvedValueOnce(listing("/")),
     });
     const { user } = renderPanel(files);
-    expect(await screen.findByRole("navigation", { name: "Current folder" })).toHaveTextContent(
-      "tester",
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "Current folder" })).toHaveTextContent(
+        "tester",
+      ),
     );
     await user.click(screen.getByRole("button", { name: "Up to parent folder" }));
     expect(files.list).toHaveBeenLastCalledWith("/home");
@@ -636,5 +691,585 @@ describe("downloads", () => {
     });
     await sweepDownloads(now);
     expect([...stored.keys()].sort()).toEqual(["localssh-download-live", "other-app-file"]);
+  });
+});
+
+describe("transfer states", () => {
+  const entry: RemoteFile = {
+    name: "backup.tar.gz",
+    kind: "file",
+    isLink: false,
+    size: 100,
+    mtime: 5,
+    mode: "rw-r--r--",
+  };
+
+  /** A download the test advances by hand. */
+  function manualDownload() {
+    const control = {
+      progress: (_n: number) => {},
+      finish: () => {},
+      fail: (_reason: string) => {},
+    };
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download: vi.fn(
+        (_p: string, onChunk: (c: Uint8Array) => Promise<void>, onProgress: (n: number) => void) =>
+          new Promise<undefined>((resolve, reject) => {
+            control.progress = onProgress;
+            control.finish = () => void onChunk(new Uint8Array([1])).then(() => resolve(undefined));
+            control.fail = (reason) => reject(reason);
+          }),
+      ),
+    });
+    return { files, control };
+  }
+
+  async function startDownload(setup: ReturnType<typeof manualDownload>, extra = {}) {
+    fakeDirectory({ writable: true });
+    const panel = renderPanel(setup.files, vi.fn(), undefined, extra);
+    await panel.user.click(
+      await screen.findByRole("button", { name: "Download file backup.tar.gz" }),
+    );
+    await screen.findByText(/Downloading backup.tar.gz: 0%/);
+    return panel;
+  }
+
+  it("shows the X-01 line with a live percent", async () => {
+    const setup = manualDownload();
+    await startDownload(setup);
+    act(() => setup.control.progress(42));
+    expect(screen.getByText(/Downloading backup.tar.gz: 42%/)).toBeVisible();
+  });
+
+  it("shows the X-02 text while resuming in the background", async () => {
+    const setup = manualDownload();
+    const { setProps } = await startDownload(setup);
+    act(() => setup.control.progress(42));
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    setProps({ transport: "resuming" });
+    expect(screen.getByText("Paused: backup.tar.gz at 42%.")).toBeVisible();
+    expect(screen.getByText("Downloads pause while localssh is in the background.")).toBeVisible();
+  });
+
+  it("shows the X-03 text while resuming in the foreground and disables other controls", async () => {
+    const setup = manualDownload();
+    const { setProps } = await startDownload(setup);
+    act(() => setup.control.progress(42));
+    setProps({ transport: "resuming" });
+    expect(screen.getByText("Resuming backup.tar.gz from 42%...")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Refresh files" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Download file backup.tar.gz" })).toBeDisabled();
+    expect(screen.getByLabelText("Upload file")).toBeDisabled();
+  });
+
+  it("returns to X-01 and announces X-04 when the session resumes", async () => {
+    const setup = manualDownload();
+    const { setProps } = await startDownload(setup);
+    act(() => setup.control.progress(42));
+    setProps({ transport: "resuming" });
+    setProps({ transport: "connected" });
+    expect(screen.getByText(/Downloading backup.tar.gz: 42%/)).toBeVisible();
+    expect(screen.getByTestId("transfer-announcement")).toHaveTextContent("Download resumed.");
+  });
+
+  it("keeps the close confirmation while a download is resuming", async () => {
+    const setup = manualDownload();
+    const { setProps, user, onClose } = await startDownload(setup);
+    setProps({ transport: "resuming" });
+    await user.click(screen.getByRole("button", { name: "Close files" }));
+    expect(screen.getByRole("alertdialog", { name: "Stop transfer" })).toBeVisible();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("announces on state changes and every 25 percent, not on each percent", async () => {
+    const setup = manualDownload();
+    await startDownload(setup);
+    const live = screen.getByTestId("transfer-announcement");
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveTextContent("Downloading backup.tar.gz, 0 percent.");
+    act(() => setup.control.progress(10));
+    expect(live).toHaveTextContent("Downloading backup.tar.gz, 0 percent.");
+    act(() => setup.control.progress(26));
+    expect(live).toHaveTextContent("Downloading backup.tar.gz, 25 percent.");
+    act(() => setup.control.progress(49));
+    expect(live).toHaveTextContent("Downloading backup.tar.gz, 25 percent.");
+    act(() => setup.control.progress(50));
+    expect(live).toHaveTextContent("Downloading backup.tar.gz, 50 percent.");
+  });
+
+  it("writes the download as a segmented record and removes it when the link is released", async () => {
+    const { directory, stored } = fakeDirectory({ writable: true });
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download: downloadOneChunk,
+    });
+    const { user, unmount } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    await screen.findByRole("link", { name: "Save download" });
+    expect([...stored.keys()].some((name) => name.startsWith("localssh-dl-"))).toBe(true);
+    unmount();
+    await waitFor(() =>
+      expect([...stored.keys()].filter((name) => name.startsWith("localssh-dl-"))).toEqual([]),
+    );
+    expect(directory.removeEntry).toHaveBeenCalled();
+  });
+
+  it("reports the stopped percent when the connection closes mid-download", async () => {
+    const setup = manualDownload();
+    const onDownloadStop = vi.fn();
+    await startDownload(setup, { onDownloadStop });
+    act(() => setup.control.progress(42));
+    expect(onDownloadStop).toHaveBeenLastCalledWith({ name: "backup.tar.gz", percent: 42 });
+    await act(async () => setup.control.fail("connection closed"));
+    expect(onDownloadStop).not.toHaveBeenLastCalledWith(null);
+  });
+
+  it("clears the stopped report when the user cancels", async () => {
+    const setup = manualDownload();
+    const onDownloadStop = vi.fn();
+    const { user } = await startDownload(setup, { onDownloadStop });
+    act(() => setup.control.progress(42));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => setup.control.fail("transfer cancelled"));
+    await waitFor(() => expect(onDownloadStop).toHaveBeenLastCalledWith(null));
+  });
+});
+
+/**
+ * An origin directory that keeps each file's bytes. Like OPFS, a writable's
+ * data appears only on close, and abort discards it.
+ */
+function segmentDirectory() {
+  const files = new Map<string, Uint8Array>();
+  const directory = {
+    getFileHandle: vi.fn(async (name: string, opts?: { create?: boolean }) => {
+      if (!files.has(name)) {
+        if (!opts?.create) throw new DOMException("missing", "NotFoundError");
+        files.set(name, new Uint8Array());
+      }
+      return {
+        createWritable: async () => {
+          const parts: Uint8Array[] = [];
+          return {
+            write: async (data: Uint8Array) => {
+              parts.push(new Uint8Array(data));
+            },
+            close: async () => {
+              files.set(name, new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer()));
+            },
+            abort: async () => {},
+          };
+        },
+        getFile: async () => {
+          const data = files.get(name);
+          if (!data) throw new DOMException("missing", "NotFoundError");
+          return new File([data.slice()], name);
+        },
+      };
+    }),
+    removeEntry: vi.fn(async (name: string) => {
+      if (!files.delete(name)) throw new DOMException("missing", "NotFoundError");
+    }),
+    keys: async function* () {
+      yield* [...files.keys()];
+    },
+  };
+  Object.defineProperty(navigator, "storage", {
+    value: { getDirectory: async () => directory },
+    configurable: true,
+  });
+  return { directory: directory as unknown as FileSystemDirectoryHandle, files };
+}
+
+describe("download resume", () => {
+  const size = 2 * SEGMENT_BYTES;
+  const entry: RemoteFile = {
+    name: "backup.tar.gz",
+    kind: "file",
+    isLink: false,
+    size,
+    mtime: 5,
+    mode: "rw-r--r--",
+  };
+  const source = new Uint8Array(size).map((_, index) => index % 251);
+
+  /** Stores a record whose first segment is committed, as a lost session leaves it. */
+  async function seedRecord(
+    directory: FileSystemDirectoryHandle,
+    overrides: Partial<DownloadRecord> = {},
+  ): Promise<DownloadRecord> {
+    const record: DownloadRecord = {
+      id: crypto.randomUUID(),
+      host: "example.test",
+      port: 22,
+      user: "tester",
+      remotePath: "/srv/backup.tar.gz",
+      size,
+      mtime: 5,
+      committedBytes: 0,
+      segments: [],
+      createdAt: Date.now(),
+      ...overrides,
+    };
+    const writer = await openSegmentedDownload(directory, record);
+    await writer.write(source.subarray(0, SEGMENT_BYTES + 10));
+    await writer.abort();
+    return (await listRecords()).find((stored) => stored.id === record.id)!;
+  }
+
+  /** A download that sends source from the requested offset. */
+  function serveSource() {
+    return vi.fn(
+      async (
+        _path: string,
+        onChunk: (chunk: Uint8Array) => Promise<void>,
+        onProgress: (n: number) => void,
+        opts?: { offset?: number; tail?: Uint8Array },
+      ) => {
+        const from = opts?.offset ?? 0;
+        await onChunk(source.subarray(from, SEGMENT_BYTES));
+        await onChunk(source.subarray(Math.max(from, SEGMENT_BYTES)));
+        onProgress(100);
+        return { grew: false, size };
+      },
+    );
+  }
+
+  function captureBlobs() {
+    const blobs: Blob[] = [];
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob);
+      return "blob:test";
+    });
+    return blobs;
+  }
+
+  async function sameAsSource(blob: Blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    return bytes.byteLength === source.byteLength && bytes.every((b, i) => b === source[i]);
+  }
+
+  it("offers X-07 for this host's stopped download and resumes from the committed offset", async () => {
+    const { directory } = segmentDirectory();
+    const record = await seedRecord(directory);
+    const blobs = captureBlobs();
+    const download = serveSource();
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+    });
+    const { user } = renderPanel(files);
+    const block = await screen.findByRole("alert");
+    expect(block).toHaveTextContent("backup.tar.gz stopped at 50% when the connection closed.");
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Resume download" }));
+    await screen.findByRole("link", { name: "Save download" });
+    expect(download).toHaveBeenCalledOnce();
+    const [path, , , opts] = download.mock.calls[0]!;
+    expect(path).toBe("/srv/backup.tar.gz");
+    expect(opts).toMatchObject({ offset: SEGMENT_BYTES, expectSize: size, expectMtime: 5 });
+    expect(opts?.tail).toEqual(source.slice(SEGMENT_BYTES - TAIL_BYTES, SEGMENT_BYTES));
+    expect(await sameAsSource(blobs.at(-1)!)).toBe(true);
+    expect(screen.queryByText(/stopped at/)).not.toBeInTheDocument();
+    expect((await listRecords()).map((stored) => stored.id)).toEqual([record.id]);
+  });
+
+  it("allows only one page to resume a stored download", async () => {
+    const { directory } = segmentDirectory();
+    const record = await seedRecord(directory);
+    let finish!: () => void;
+    const download = vi.fn(
+      () =>
+        new Promise<undefined>((resolve) => {
+          finish = () => resolve(undefined);
+        }),
+    );
+    const first = renderPanel(makeFiles({ download }));
+    const second = renderPanel(makeFiles({ download }));
+    const firstResume = await within(first.container).findByRole("button", {
+      name: "Resume download",
+    });
+    const secondResume = await within(second.container).findByRole("button", {
+      name: "Resume download",
+    });
+    await first.user.click(firstResume);
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+    await second.user.click(secondResume);
+    await waitFor(() => expect(navigator.locks.request).toHaveBeenCalledTimes(2));
+    expect(download).toHaveBeenCalledTimes(1);
+    expect((await listRecords()).some((item) => item.id === record.id)).toBe(true);
+    finish();
+    await within(first.container).findByRole("link", { name: "Save download" });
+    await second.user.click(secondResume);
+    await waitFor(() => expect(navigator.locks.request).toHaveBeenCalledTimes(3));
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes the record when the finished download's link is released", async () => {
+    const { directory, files: stored } = segmentDirectory();
+    await seedRecord(directory);
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download: serveSource(),
+    });
+    const { user, unmount } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "Resume download" }));
+    await screen.findByRole("link", { name: "Save download" });
+    unmount();
+    await waitFor(async () => expect(await listRecords()).toEqual([]));
+    expect([...stored.keys()]).toEqual([]);
+  });
+
+  it("does not offer records of another host, port or user", async () => {
+    const { directory } = segmentDirectory();
+    await seedRecord(directory, { host: "other.test" });
+    await seedRecord(directory, { port: 2222 });
+    await seedRecord(directory, { user: "someone" });
+    renderPanel(makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", [entry])) }));
+    await screen.findByRole("button", { name: "Download file backup.tar.gz" });
+    await act(async () => {});
+    expect(screen.queryByText(/stopped at/)).not.toBeInTheDocument();
+    expect(await listRecords()).toHaveLength(3);
+  });
+
+  it("shows X-06 when the file changed, and Retry starts over at 0", async () => {
+    const { directory } = segmentDirectory();
+    await seedRecord(directory);
+    const blobs = captureBlobs();
+    const served = serveSource();
+    const download = vi
+      .fn()
+      .mockRejectedValueOnce("Error: remote file changed")
+      .mockImplementation(served);
+    const list = vi.fn().mockResolvedValue(listing("/srv", [entry]));
+    const { user } = renderPanel(makeFiles({ list, download }));
+    await user.click(await screen.findByRole("button", { name: "Resume download" }));
+    const block = await screen.findByRole("alert");
+    expect(block).toHaveTextContent("Could not resume backup.tar.gz.");
+    expect(block).toHaveTextContent("It changed on the server after the download started.");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Resume download" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("link", { name: "Save download" });
+    expect(download).toHaveBeenCalledTimes(2);
+    expect(download.mock.calls[1]).toHaveLength(3);
+    expect(list).toHaveBeenLastCalledWith("/srv");
+    expect(await sameAsSource(blobs.at(-1)!)).toBe(true);
+  });
+
+  it("shows X-05 after a lost file connection and resumes from the offset", async () => {
+    segmentDirectory();
+    const blobs = captureBlobs();
+    const served = serveSource();
+    const download = vi
+      .fn()
+      .mockImplementationOnce(
+        async (_path: string, onChunk: (chunk: Uint8Array) => Promise<void>) => {
+          await onChunk(source.subarray(0, SEGMENT_BYTES + 10));
+          throw "Error: connection closed";
+        },
+      )
+      .mockImplementation(served);
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+    });
+    const { user } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    const block = await screen.findByRole("alert");
+    expect(block).toHaveTextContent("Could not resume backup.tar.gz.");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Resume download" }));
+    await screen.findByRole("link", { name: "Save download" });
+    expect(download.mock.calls[1]?.[3]).toMatchObject({ offset: SEGMENT_BYTES });
+    expect(await sameAsSource(blobs.at(-1)!)).toBe(true);
+  });
+
+  it("treats a cancel the user did not ask for as a lost connection", async () => {
+    segmentDirectory();
+    // The engine cancels the running transfer when the session's file connection closes.
+    const download = vi.fn(async (_path: string, onChunk: (c: Uint8Array) => Promise<void>) => {
+      await onChunk(source.subarray(0, SEGMENT_BYTES + 10));
+      throw "Error: transfer cancelled";
+    });
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+    });
+    const { user } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    await screen.findByText("Could not resume backup.tar.gz.");
+    expect(screen.getByRole("button", { name: "Resume download" })).toBeVisible();
+    expect(await listRecords()).toHaveLength(1);
+  });
+
+  it("asks before closing Files while X-05 holds an unfinished download", async () => {
+    segmentDirectory();
+    const download = vi.fn(async (_path: string, onChunk: (c: Uint8Array) => Promise<void>) => {
+      await onChunk(source.subarray(0, 10));
+      throw "Error: connection closed";
+    });
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+    });
+    const { user, onClose } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    await screen.findByText("Could not resume backup.tar.gz.");
+    await user.click(screen.getByRole("button", { name: "Close files" }));
+    expect(screen.getByRole("alertdialog", { name: "Stop transfer" })).toBeVisible();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("Cancel deletes the record and its segments without asking", async () => {
+    const { files: stored } = segmentDirectory();
+    const download = vi.fn(async (_path: string, onChunk: (c: Uint8Array) => Promise<void>) => {
+      await onChunk(source.subarray(0, SEGMENT_BYTES + 10));
+      throw "Error: connection closed";
+    });
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+    });
+    const { user } = renderPanel(files);
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    await screen.findByText("Could not resume backup.tar.gz.");
+    expect(await listRecords()).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Could not resume/)).not.toBeInTheDocument());
+    expect(await listRecords()).toEqual([]);
+    expect([...stored.keys()]).toEqual([]);
+  });
+
+  it("keeps the partial download when the session ends and Files unmounts", async () => {
+    segmentDirectory();
+    let fail!: (reason: string) => void;
+    const download = vi.fn(async (_path: string, onChunk: (c: Uint8Array) => Promise<void>) => {
+      await onChunk(source.subarray(0, SEGMENT_BYTES + 10));
+      return new Promise<undefined>((_, reject) => {
+        fail = reject;
+      });
+    });
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+      // Closing the file connection cancels the running transfer, as the engine does.
+      close: vi.fn(() => fail("Error: transfer cancelled")),
+    });
+    const onDownloadStop = vi.fn();
+    const { user, unmount } = renderPanel(files, vi.fn(), undefined, { onDownloadStop });
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    await waitFor(() => expect(download).toHaveBeenCalled());
+    await waitFor(async () => expect((await listRecords())[0]?.committedBytes).toBe(SEGMENT_BYTES));
+    unmount();
+    await act(async () => {});
+    expect(await listRecords()).toHaveLength(1);
+    expect(onDownloadStop).not.toHaveBeenLastCalledWith(null);
+  });
+
+  it("discards the partial download on Stop and close", async () => {
+    segmentDirectory();
+    let fail!: (reason: string) => void;
+    const download = vi.fn(async (_path: string, onChunk: (c: Uint8Array) => Promise<void>) => {
+      await onChunk(source.subarray(0, SEGMENT_BYTES + 10));
+      return new Promise<undefined>((_, reject) => {
+        fail = reject;
+      });
+    });
+    const files = makeFiles({
+      list: vi.fn().mockResolvedValue(listing("/srv", [entry])),
+      download,
+      close: vi.fn(() => fail("Error: transfer cancelled")),
+    });
+    const onClose = vi.fn();
+    const { user, unmount } = renderPanel(files, onClose);
+    await user.click(await screen.findByRole("button", { name: "Download file backup.tar.gz" }));
+    await waitFor(async () => expect((await listRecords())[0]?.committedBytes).toBe(SEGMENT_BYTES));
+    await user.click(screen.getByRole("button", { name: "Close files" }));
+    await user.click(screen.getByRole("button", { name: "Stop and close" }));
+    expect(onClose).toHaveBeenCalled();
+    unmount();
+    await waitFor(async () => expect(await listRecords()).toEqual([]));
+  });
+
+  it("Dismiss deletes the stopped record", async () => {
+    const { directory } = segmentDirectory();
+    await seedRecord(directory);
+    const { user } = renderPanel(
+      makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", [entry])) }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(screen.queryByText(/stopped at/)).not.toBeInTheDocument());
+    expect(await listRecords()).toEqual([]);
+  });
+
+  it("shows the next stopped download after dismissing the newest", async () => {
+    const { directory } = segmentDirectory();
+    const older = await seedRecord(directory, {
+      remotePath: "/srv/older.tar.gz",
+      createdAt: Date.now() - 1000,
+    });
+    const newer = await seedRecord(directory, {
+      remotePath: "/srv/newer.tar.gz",
+      createdAt: Date.now(),
+    });
+    const { user } = renderPanel(makeFiles());
+    await screen.findByText(/newer.tar.gz stopped at/);
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await screen.findByText(/older.tar.gz stopped at/);
+    expect((await listRecords()).map((record) => record.id)).toEqual([older.id]);
+    expect((await listRecords()).some((record) => record.id === newer.id)).toBe(false);
+  });
+
+  it("shows the next stopped download after completing the newest", async () => {
+    const { directory } = segmentDirectory();
+    await seedRecord(directory, {
+      remotePath: "/srv/older.tar.gz",
+      createdAt: Date.now() - 1000,
+    });
+    await seedRecord(directory, {
+      remotePath: "/srv/newer.tar.gz",
+      createdAt: Date.now(),
+    });
+    captureBlobs();
+    const { user } = renderPanel(makeFiles({ download: serveSource() }));
+    await screen.findByText(/newer.tar.gz stopped at/);
+    await user.click(screen.getByRole("button", { name: "Resume download" }));
+    await screen.findByRole("link", { name: "Save download" });
+    await screen.findByText(/older.tar.gz stopped at/);
+  });
+
+  it("offers only Retry and Dismiss when a segment is already missing", async () => {
+    const { directory, files: stored } = segmentDirectory();
+    const record = await seedRecord(directory);
+    stored.delete(record.segments[0]!);
+    renderPanel(makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", [entry])) }));
+    await screen.findByText("backup.tar.gz stopped at 50% when the connection closed.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Resume download" })).not.toBeInTheDocument();
+  });
+
+  it("restarts cleanly from 0 when a segment disappears before Resume", async () => {
+    const { directory, files: stored } = segmentDirectory();
+    const record = await seedRecord(directory);
+    const blobs = captureBlobs();
+    const download = serveSource();
+    const { user } = renderPanel(
+      makeFiles({ list: vi.fn().mockResolvedValue(listing("/srv", [entry])), download }),
+    );
+    const resume = await screen.findByRole("button", { name: "Resume download" });
+    stored.delete(segmentName(record.id, 0));
+    await user.click(resume);
+    await screen.findByRole("link", { name: "Save download" });
+    expect(download).toHaveBeenCalledOnce();
+    expect(download.mock.calls[0]).toHaveLength(3);
+    expect(await sameAsSource(blobs.at(-1)!)).toBe(true);
+    const records = await listRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]!.id).not.toBe(record.id);
   });
 });

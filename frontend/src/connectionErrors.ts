@@ -27,6 +27,7 @@ export type ConnectionFailureKind =
   | "key-rejected"
   | "host-key"
   | "connection-lost"
+  | "session-expired"
   | "engine-load"
   | "unknown";
 
@@ -118,6 +119,11 @@ const VARIANTS: Record<ConnectionFailureKind, Variant> = {
     recovery: "Check your network connection, then connect again.",
     topic: "troubleshooting",
   },
+  "session-expired": {
+    message: "Session expired.",
+    recovery: "The connection to the server was lost. Reconnect to start a new session.",
+    topic: "troubleshooting",
+  },
   "engine-load": {
     message: "Could not load the SSH engine.",
     recovery: "Reload the page and try again.",
@@ -145,6 +151,14 @@ const PATTERNS: [RegExp, ConnectionFailureKind][] = [
   [/target connection timeout|target host unreachable|context deadline exceeded/, "timeout"],
   [/could not reach the relay/, "relay-unreachable"],
   [/Could not load the SSH engine/, "engine-load"],
+  [
+    /relay connection closed: (?:expired|superseded|resume_disabled|offset_mismatch|retention_exceeded)\b/,
+    "session-expired",
+  ],
+  [
+    /relay session (?:expired|superseded|offset_mismatch|retention_exceeded)\b|relay resume disabled/,
+    "session-expired",
+  ],
   [/^connection lost|relay connection closed|target connection error/, "connection-lost"],
 ];
 

@@ -4,23 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { About } from "./About.js";
 import { HostKeyPrompt } from "./HostKeyPrompt.js";
-import { TerminalSettings } from "./TerminalSettings.js";
-import { loadTerminalSettings } from "../storage/settingsStore.js";
 
 describe("accessibility focus management", () => {
-  it("returns focus to Appearance when Escape closes its disclosure", async () => {
-    const user = userEvent.setup();
-    render(<TerminalSettings value={loadTerminalSettings()} onChange={() => {}} />);
-
-    const summary = screen.getByRole("button", { name: "Appearance" });
-    await user.click(summary);
-    await user.tab();
-    await user.keyboard("{Escape}");
-
-    expect(summary).toHaveFocus();
-    expect(summary.closest("details")).not.toHaveAttribute("open");
-  });
-
   it("returns focus to About when Escape closes its disclosure", async () => {
     const user = userEvent.setup();
     render(<About />);
