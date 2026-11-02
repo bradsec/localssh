@@ -320,3 +320,21 @@ test("the input field covers only the cursor row, so a focused keyboard leaves o
   expect(Math.abs(layout.fieldRight - layout.screenRight)).toBeLessThanOrEqual(1);
   expect(layout.aboveIsField).toBe(false);
 });
+
+test("a selection in the text layer drops the keyboard so iOS can show Copy", async ({ page }) => {
+  await connect(page);
+  await typeInShell(page, "dropkeys");
+  await expect(page.locator(".terminal-touch-text")).toContainText("dropkeys");
+  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+
+  // A selection made by the browser itself, as Safari's long press does.
+  await page.evaluate(() => {
+    const text = document.querySelector(".terminal-touch-text > div")!;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(range);
+  });
+  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+  expect(await page.evaluate(() => document.getSelection()?.toString().length)).toBeGreaterThan(0);
+});
