@@ -53,9 +53,7 @@ others discover the project.
 
 ## Interface preview
 
-![Current connection form with password and private-key choices](screenshot1.png)
-
-![Two connected terminal tabs with the SFTP file panel open beside the terminal](screenshot2.png)
+![Connection form with password and private-key choices, and the saved hosts panel](screenshot1.png)
 
 See the [user guide](docs/USER-GUIDE.md) for the current controls.
 
@@ -293,9 +291,10 @@ unless `KEEPALIVE_MAX_SECONDS` is set. The relay reports support and its cap at
 `GET /capabilities` in the combined image, or `GET /relay/capabilities` through
 the two-image nginx proxy. A direct standalone relay also answers
 `GET /capabilities`. Cross-origin pages can read this response only when their
-Origin is in `ALLOWED_ORIGINS`; the supplied frontend CSP permits `ws:` and
-`wss:` but only same-origin HTTP requests. Supported deployments use the page
-and relay on the same origin.
+Origin is in `ALLOWED_ORIGINS`. The supplied frontend CSP permits `ws:`,
+`wss:`, `http:`, and `https:` connections so a page can read a relay's
+`/capabilities` on another origin. Supported deployments use the page and relay
+on the same origin.
 
 For resumable sessions, the relay may take up to 90 seconds to detect an
 inactive page before it starts the keep-alive period. Output can stall while
@@ -560,6 +559,14 @@ page, so the terminal refits into whatever the on-screen keyboard leaves and the
 cursor row stays above it. Tapping the terminal raises the keyboard, and
 dismissing it is left to the keyboard's own control.
 
+### Home Screen app
+
+The page ships a web app manifest and Home Screen icons, so "Add to Home Screen"
+on iPhone or iPad gives a localssh icon and a full-screen window with no Safari
+toolbar. A Home Screen app keeps its storage separate from Safari, as far as we
+know (not re-verified on iOS 26): saved hosts and known host keys you set up in
+Safari do not carry over, and the reverse. Pick one and set up your hosts there.
+
 ### Key bar
 
 A touch device gets a key bar along the bottom of the session, carrying the keys
@@ -596,7 +603,8 @@ Keyboard and More keys stay fixed. The order is saved on this device.
 On a phone, drag vertically with one finger to scroll terminal output. A
 horizontal drag or prompt flick sends no shell key; use the visible key bar.
 Touch and hold terminal text to select it with the native handles and Copy
-callout; touch and hold empty space for the native Paste callout. **Select
+callout; touch and hold the prompt line for the native Paste callout. Text on
+the prompt line itself is not selectable. **Select
 text** in the Actions menu opens a read-only view with native text selection
 for scrollback beyond the screen. It also works after a session closes. Desktop and tablet terminal
 gestures remain unchanged.
@@ -604,8 +612,8 @@ gestures remain unchanged.
 ### Clipboard
 
 On touch screens, touch and hold terminal text to select it with the native
-handles and use the device's Copy action; touch and hold empty space for the
-native Paste callout, which works over plain HTTP. For scrollback beyond the
+handles and use the device's Copy action; touch and hold the prompt line for
+the native Paste callout, which works over plain HTTP. For scrollback beyond the
 screen, **Select text** in the Actions menu opens a read-only view with native
 selection handles. A **Clipboard** menu sits in the session toolbar (under **Actions**
 below 1024px wide) for copying a live terminal selection and pasting without a

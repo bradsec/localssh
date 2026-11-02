@@ -102,7 +102,7 @@ bar includes Shift Tab and Text smaller/Text larger. **Settings**, **Edit key
 bar** lets you reorder, add, remove, or reset keys. Keyboard and More keys
 stay fixed. Drag vertically with one finger to scroll output; horizontal drags
 and prompt flicks send no shell keys. Touch and hold terminal text to select it with
-native handles and Copy; touch and hold empty space for the native Paste. **Select
+native handles and Copy; touch and hold the prompt line for the native Paste. **Select
 text** in the Actions menu opens a read-only view for scrollback beyond the screen.
 
 Use **Settings** to change font, size, line height, and color scheme. Line
