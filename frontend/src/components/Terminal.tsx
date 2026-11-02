@@ -16,6 +16,12 @@ import {
 import { resizeKeepingSelection } from "../terminalSelection.js";
 import { snapshotTerminalText } from "../terminalSnapshot.js";
 import { loadTerminalFont } from "../terminalFonts.js";
+import {
+  attachTouchTextLayer,
+  pasteTerminalText,
+  selectWordAt,
+  type TouchTextLayer,
+} from "../terminalTouch.js";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalControls {
@@ -43,7 +49,6 @@ export interface TerminalProps {
   onFocusChange?: (focused: boolean) => void;
   /** Reports whether the terminal currently holds a text selection. */
   onSelectionChange?: (hasSelection: boolean) => void;
-  onSelectText?: () => void;
   fontSize: number;
   fontFamily: string;
   lineHeight: number;
@@ -58,7 +63,6 @@ export function Terminal({
   onResize,
   onFocusChange,
   onSelectionChange,
-  onSelectText,
   fontSize,
   fontFamily,
   lineHeight,
@@ -78,8 +82,6 @@ export function Terminal({
   onFocusChangeRef.current = onFocusChange;
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
-  const onSelectTextRef = useRef(onSelectText);
-  onSelectTextRef.current = onSelectText;
 
   // xterm does not announce a selection restored after a resize, because its
   // change detection never saw the resize clear it, so the state is reported
@@ -158,12 +160,27 @@ export function Terminal({
     void document.fonts.ready.then(fitTerminal);
     fitTerminal();
 
-    const detachGestures = attachGestures(containerRef.current, {
+    // A touch device gets a selectable copy of the visible rows and an editable
+    // field under the finger, so its own long-press Copy and Paste callouts work
+    // on the live terminal. Mouse devices keep xterm's own selection.
+    const touchHost = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const textLayer = touchHost ? attachTouchTextLayer(term) : null;
+    const host = containerRef.current;
+    const pasteInto = (event: Event) =>
+      pasteTerminalText(event as ClipboardEvent, term.paste.bind(term));
+    if (textLayer) {
+      host.classList.add("terminal-host--touch");
+      // Capture phase, so xterm's own paste listener on the textarea does not
+      // also send the text.
+      host.addEventListener("paste", pasteInto, true);
+    }
+
+    const detachGestures = attachGestures(host, {
       term,
       onInput,
       isPhoneScreen: () => phoneScreenRef.current,
       smallScreenIOS: isSmallScreenIOS(currentIOSDevice()),
-      onSelectText: () => onSelectTextRef.current?.(),
+      textLayer,
     });
 
     return () => {
@@ -173,6 +190,11 @@ export function Terminal({
       textarea?.removeEventListener("focus", reportFocus);
       textarea?.removeEventListener("blur", reportBlur);
       detachGestures();
+      if (textLayer) {
+        host.removeEventListener("paste", pasteInto, true);
+        host.classList.remove("terminal-host--touch");
+        textLayer.dispose();
+      }
       dataSubscription.dispose();
       resizeSubscription.dispose();
       selectionSubscription.dispose();
@@ -265,19 +287,24 @@ interface GestureTargets {
   onInput: (data: string) => void;
   isPhoneScreen: () => boolean;
   smallScreenIOS: boolean;
-  onSelectText: () => void;
+  /** Present on touch devices: the selectable copy of the visible rows. */
+  textLayer: TouchTextLayer | null;
 }
 
 /**
  * Recognises tablet touch gestures for shell keys; phone drags only scroll.
- * Pointer events cover touch and pen without claiming the mouse. A stationary
- * long press opens the read-only text view instead of selecting xterm cells.
+ * Pointer events cover touch and pen without claiming the mouse. A long press
+ * belongs to the browser: it selects text in the selectable copy of the rows or
+ * shows Paste on the editable field beneath them. While such a selection exists
+ * every gesture here stands down, so nothing reaches the shell.
  *
  * A tap focuses the terminal from inside the pointerup handler. Safari opens the
  * on-screen keyboard only for a focus() made during a user gesture, and xterm's
  * own focus happens in a synthesised mousedown, which is a weaker claim to that
  * gesture; focusing here makes a tap raise the keyboard on iOS.
  */
+const LONG_PRESS_MS = 600;
+
 function attachGestures(element: HTMLElement, targets: GestureTargets): () => void {
   const isPhoneScreen = targets.isPhoneScreen;
   const active = new Map<number, { x: number; y: number }>();
@@ -327,6 +354,8 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
 
   const onPointerDown = (event: PointerEvent) => {
     if (event.pointerType === "mouse") return;
+    // Let the browser keep or dismiss its selection; no swipe, scroll, or tap.
+    if (targets.textLayer?.hasSelection()) return;
 
     // Keep Safari from turning the long press into page movement or its native
     // callout. Capturing also keeps the drag alive when a thumb strays outside
@@ -349,11 +378,14 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       oneFingerY = event.clientY;
       oneFingerRemainder = 0;
       cancelLongPress();
+      const { clientX, clientY } = event;
       longPressTimer = window.setTimeout(() => {
+        const layer = targets.textLayer;
+        if (!layer) return;
         handled = true;
-        targets.term.blur();
-        targets.onSelectText();
-      }, 500);
+        // Touch Safari selects by itself first; select the word only when it did not.
+        if (!layer.hasSelection()) selectWordAt(layer.mirror, clientX, clientY);
+      }, LONG_PRESS_MS);
     } else {
       // A second finger explicitly drives scrollback, never shell input.
       start = null;
@@ -369,6 +401,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   const onPointerMove = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (targets.textLayer?.hasSelection()) return;
 
     if (start && !isTap({ dx: event.clientX - start.x, dy: event.clientY - start.y })) {
       cancelLongPress();
@@ -453,6 +486,10 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     }
 
     if (!start || active.size > 0) return;
+    if (targets.textLayer?.hasSelection()) {
+      start = null;
+      return;
+    }
 
     const sample = {
       dx: event.clientX - start.x,
