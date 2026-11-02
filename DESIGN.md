@@ -11,20 +11,24 @@
 
 | Role | Light | Dark | Use |
 | --- | --- | --- | --- |
-| Canvas | `#F6F8F7` | `#151C1E` | App background |
-| Surface | `#FFFFFF` | `#1D2729` | Form, toolbar, dialog, file panel |
-| Surface subtle | `#ECF1F0` | `#263235` | Hover, selected neutral area |
-| Text | `#202A2B` | `#E6EDEF` | Primary copy |
-| Text muted | `#506062` | `#AAB9BB` | Secondary copy and labels |
-| Border decorative | `#D6DFDD` | `#39484B` | Dividers only |
-| Border control | `#788B8D` | `#74888A` | Input outline and control affordance |
-| Accent | `#245D6B` | `#75C1D1` | Primary action, active tab indicator, focus |
-| Accent text | `#FFFFFF` | `#151C1E` | Text on accent |
+| Canvas | `#F6F7FB` | `#15161E` | App background |
+| Surface | `#FFFFFF` | `#1E202B` | Form, toolbar, dialog, file panel |
+| Surface subtle | `#EDEFF6` | `#282B39` | Hover, selected neutral area |
+| Text | `#1E2233` | `#E4E7F2` | Primary copy |
+| Text muted | `#525971` | `#A9AFC7` | Secondary copy and labels |
+| Border decorative | `#D9DCE7` | `#363A4D` | Dividers only |
+| Border control | `#787F99` | `#777E9B` | Input outline and control affordance |
+| Accent | `#3A4FBF` | `#8FA3F7` | Primary action, active tab indicator, focus |
+| Accent hover | `#2E3F9C` | `#ADBCFA` | Hover on accent fill |
+| Accent text | `#FFFFFF` | `#15161E` | Text on accent |
 | Danger | `#A53636` | `#F09994` | Errors and changed host key only |
-| Danger surface | `#FFF1F0` | `#342326` | Error panels |
+| Danger surface | `#FFF1F0` | `#33232B` | Error panels |
 | Success | TBD | TBD | Success feedback only, never decoration |
 
-- Contrast checks by WCAG relative luminance: light text/canvas 13.79:1, muted/canvas 6.17:1, accent/white 7.36:1, control border/white 3.57:1. Dark text/canvas 14.57:1, muted/canvas 8.52:1, accent/canvas 8.47:1. Dark control border/surface must be checked at implementation because the adjacent surface differs from canvas.
+- Palette "Iris Slate": chrome neutrals take the hue of the default terminal theme (Tokyo Night) so chrome and terminal read as one instrument. The favicon tile `#2A2E42` belongs to the same family.
+- Contrast checks by WCAG relative luminance: light text/canvas 14.73:1, muted/canvas 6.48:1, muted/subtle 6.04:1, accent/white 6.88:1, accent/subtle 5.99:1, control border/white 3.97:1, control border/subtle 3.45:1. Dark text/canvas 14.60:1, muted/subtle 6.45:1, accent/surface 6.75:1, accent/subtle 5.85:1, accent text on accent 7.51:1, control border/surface 4.04:1, control border/subtle 3.51:1, danger/surface 7.47:1.
+- Backdrop: light `rgb(14 15 24 / .56)`, dark `rgb(4 5 10 / .68)`. `theme-color` metas follow Surface.
+- Terminal themes stay independent of chrome tokens; Tokyo Night stays the default.
 - Keep the existing bundled IBM Plex Sans and IBM Plex Mono. UI scale in CSS px: title 24/30 weight 600; section 18/24 weight 600; body and controls 14/20 weight 400 or 600; secondary 13/18; metadata 12/16. Inputs remain at least 16px. Terminal font family, size, theme, and user settings remain separate.
 - Spacing scale in CSS px: 4, 8, 12, 16, 24, 32. Use 16px for control grouping, 24px between work areas, 8px for label to field. Do not create elastic blank space between Connect and Saved hosts.
 - Radius: controls 6px, panels and dialogs 8px, terminal viewport 0px. Elevation: no shadow on the connect work area; one 0 8px 24px rgba(0,0,0,.16) shadow for overlays only.
@@ -34,6 +38,8 @@
 
 ## Layout
 
+- Phone chrome insets: chrome text starts 12px from the screen edge plus safe area (header, panel content via 4px panel padding plus 8px item padding); key boxes start 8px from the edge; the terminal keeps 6px cell padding.
+- Home Screen web app: `manifest.webmanifest` with `display: standalone`, `start_url` and `scope` `/`, 192, 512, and maskable 512 icons, 180px apple-touch-icon, `apple-mobile-web-app-capable`, `apple-mobile-web-app-title` `localssh`, status bar style `default`. Bottom bars keep the safe-area inset with the keyboard closed and drop to 6px while the software keyboard is open.
 - Breakpoints: phone below 720px, tablet 720 to 1023px, desktop 1024px and up. Keep a usable 320px minimum. Breakpoints describe layout changes, not device identity.
 - Breakpoint decisions (step 3): during a session the toolbar collapses its controls into one `Actions` menu below 1024px, because the direct controls overlapped the brand and target at 768px. Connect uses two columns from 1024px and one 640px column below. Files is a side pane from 920px (560px terminal plus 360px pane) and replaces the terminal below.
 - Connect desktop: 12-column grid capped at 1120px, 24px gutters. Connection occupies 7 columns, Saved hosts 5 columns. Top align both. No surrounding split hero card. Below 1024px use one column. The form has no `Connection details` heading; the page title sits directly above Host. At phone use one column with 16px side padding and 24px between work areas.
@@ -48,6 +54,9 @@
 
 ## Components
 
+- Key bar: measured keys are flexible, `flex: 1 1 44px`, so the row has no dead slot before More keys; capacity still counts 44px keys and 4px gaps. Keys cap at 64px (the spec proposed 56px; 64px absorbs the 320px remainder). Glyph faces 16px. The More keys panel is a grid of `minmax(44px, 1fr)` columns filling the width.
+- Phone session switcher: the chevron uses Text muted (never the platform default button colour); the target uses IBM Plex Mono 13/18 in the header and in Open terminals rows.
+- Settings: section headings 14/20 weight 600 with 24px above each section after the first.
 - All buttons, inputs, selects, summaries, tab controls, and key controls have at least 44 by 44 CSS px hit regions. Exception: Files panel rows and panel toolbar controls are 32px tall under fine pointers (mouse, trackpad) for density, still above the WCAG 2.2 SC 2.5.8 24px minimum, and return to 44px under `(pointer: coarse)`. Keep persistent labels and visible 3px focus outlines with 2px offset. Icon-only controls require accessible names.
 - Primary button: one per task region. Default accent fill; hover accent darkens in light mode or lightens in dark; active no positional shift; focus outlined; disabled shows text plus disabled affordance; loading uses current action text and reserves width.
 - Secondary button: surface fill, control border, text. Destructive button: danger fill or border only at a destructive decision. Menus and dialogs restore focus to their trigger.
@@ -79,7 +88,10 @@
 
 - Confirm whether the existing `>_` tile is a formal brand asset. The current brief treats it as UI decoration; preserve the localssh wordmark.
 - Dark control border `#74888A` on surface `#1D2729` measured 4.10:1 in step 2 (closed).
-- `--terminal-shell` `#1A1B26` in `app.css` is the Tokyo Night background used for the terminal frame and padding. It is not a token in this table and does not follow a non-default terminal theme. Decide whether the frame follows the selected terminal theme.
+- `--terminal-shell` `#1A1B26` is only the pre-theme first-paint stand-in; `.terminal-host` already paints the selected theme's background (closed).
+- Light OS mode pairs white chrome with the dark default terminal. Decide whether light mode gets a light default terminal theme.
+- Home Screen icon artwork pending brand-mark decision on `>_`.
+- iOS Home Screen web apps keep storage separate from Safari (saved hosts, known host keys). A Help and README note exists; needs a device check.
 - Connect screen signature: the target idea shows only in the session toolbar. Proposal: a read-only mono line above `Connect to server` that composes `username@host:port` from the fields as typed, using the same style as the session target, so the connect screen and session share one fixed point. Needs a copy and accessibility decision before building.
 - Success token remains TBD; nothing uses it.
 - Run a full WCAG 2.2 AA audit and physical iOS/Android checks after implementation. Current Chromium captures do not prove mobile browser or screen reader behavior.

@@ -33,6 +33,14 @@ export const VIEWPORT_HEIGHT_PROPERTY = "--app-height";
 /** Custom property the stylesheet reads for the shell's offset down the screen. */
 export const VIEWPORT_OFFSET_PROPERTY = "--app-viewport-offset";
 
+/** Attribute set on the root while the software keyboard covers the screen. */
+export const KEYBOARD_ATTRIBUTE = "data-keyboard";
+/**
+ * How much shorter than the layout viewport the visual one has to be before it
+ * counts as a keyboard. Browser toolbars collapsing take far less than this.
+ */
+export const KEYBOARD_MIN_HEIGHT = 120;
+
 /**
  * How often the viewport is measured on top of its own events. Short enough
  * that the toolbar collapse is picked up before it can be seen, and cheap
@@ -52,6 +60,7 @@ export function trackViewportHeight(
 ): () => void {
   let publishedHeight = "";
   let publishedOffset = "";
+  let keyboardOpen = false;
 
   // Floor rather than round: a height rounded up past the real viewport gives
   // the page a sliver to scroll, and iOS then drifts the whole layout upward.
@@ -68,6 +77,12 @@ export function trackViewportHeight(
     if (offset !== publishedOffset) {
       publishedOffset = offset;
       root.style.setProperty(VIEWPORT_OFFSET_PROPERTY, offset);
+    }
+    const open = window.innerHeight - viewport.height > KEYBOARD_MIN_HEIGHT;
+    if (open !== keyboardOpen) {
+      keyboardOpen = open;
+      if (open) root.setAttribute(KEYBOARD_ATTRIBUTE, "open");
+      else root.removeAttribute(KEYBOARD_ATTRIBUTE);
     }
   };
 
@@ -86,5 +101,6 @@ export function trackViewportHeight(
     viewport.removeEventListener("scroll", apply);
     root.style.removeProperty(VIEWPORT_HEIGHT_PROPERTY);
     root.style.removeProperty(VIEWPORT_OFFSET_PROPERTY);
+    root.removeAttribute(KEYBOARD_ATTRIBUTE);
   };
 }
