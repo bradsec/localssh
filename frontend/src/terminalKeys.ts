@@ -68,19 +68,20 @@ export const KEY_BAR_KEYS: readonly TerminalKey[] = [
 ];
 
 /**
- * The default order. TUI and coding-agent prompts lead (ctrl, esc, tab,
- * shift-tab), history recall follows, and the punctuation that is buried behind
- * a shift on the iOS keyboard comes last, before the text size keys.
+ * The default order. TUI and coding-agent prompts lead (ctrl, esc, tab), Enter
+ * sits within the first five so it stays on a phone's single row, history recall
+ * follows, and the punctuation that is buried behind a shift on the iOS keyboard
+ * comes last, before the text size keys.
  */
 export const DEFAULT_KEY_ORDER: readonly string[] = [
   "ctrl",
   "esc",
   "tab",
-  "shift-tab",
+  "enter",
   "up",
   "down",
-  "enter",
   "backspace",
+  "shift-tab",
   "alt",
   "ctrl-c",
   "left",
