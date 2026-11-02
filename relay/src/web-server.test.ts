@@ -12,6 +12,8 @@ const root = await mkdtemp(join(tmpdir(), "localssh-web-"));
 await writeFile(join(root, "index.html"), "<title>localssh</title>");
 await writeFile(join(root, "engine.wasm"), "wasm");
 await writeFile(join(root, "app.js"), "js");
+await writeFile(join(root, "manifest.webmanifest"), "{}");
+await writeFile(join(root, "icon-192.png"), "png");
 
 it("serves the page and WASM with security headers, and keeps /relay for WebSocket", async () => {
   const server = createServer(createWebHandler(root));
@@ -34,6 +36,10 @@ it("serves the page and WASM with security headers, and keeps /relay for WebSock
     expect((await fetch(`${base}/engine.wasm`)).headers.get("content-type")).toBe(
       "application/wasm",
     );
+    expect((await fetch(`${base}/manifest.webmanifest`)).headers.get("content-type")).toBe(
+      "application/manifest+json",
+    );
+    expect((await fetch(`${base}/icon-192.png`)).headers.get("content-type")).toBe("image/png");
     expect((await fetch(`${base}/healthz`)).status).toBe(200);
     expect((await fetch(`${base}/missing/route`)).status).toBe(200);
     expect((await fetch(`${base}/../package.json`)).headers.get("content-type")).not.toBe(

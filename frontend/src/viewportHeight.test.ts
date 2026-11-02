@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  KEYBOARD_ATTRIBUTE,
   trackViewportHeight,
   VIEWPORT_HEIGHT_PROPERTY,
   VIEWPORT_OFFSET_PROPERTY,
@@ -52,6 +53,29 @@ describe("trackViewportHeight", () => {
 
     expect(root.style.getPropertyValue(VIEWPORT_HEIGHT_PROPERTY)).toBe("812px");
     expect(root.style.getPropertyValue(VIEWPORT_OFFSET_PROPERTY)).toBe("0px");
+  });
+
+  it("marks the root while the keyboard covers the screen and clears it after", () => {
+    const root = document.createElement("div");
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(844);
+    const { viewport, resizeTo } = fakeViewport(844);
+
+    const stop = trackViewportHeight(viewport, root);
+    expect(root.hasAttribute(KEYBOARD_ATTRIBUTE)).toBe(false);
+
+    resizeTo(844 - 90);
+    expect(root.hasAttribute(KEYBOARD_ATTRIBUTE)).toBe(false);
+
+    resizeTo(844 - 336);
+    expect(root.getAttribute(KEYBOARD_ATTRIBUTE)).toBe("open");
+
+    resizeTo(844);
+    expect(root.hasAttribute(KEYBOARD_ATTRIBUTE)).toBe(false);
+
+    resizeTo(844 - 336);
+    stop();
+    expect(root.hasAttribute(KEYBOARD_ATTRIBUTE)).toBe(false);
+    vi.restoreAllMocks();
   });
 
   // The keyboard opening is reported as a shrunken visual viewport, and this is

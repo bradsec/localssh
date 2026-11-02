@@ -2,15 +2,15 @@
    semantic roles below, so a palette change happens here and nowhere else. */
 :root {
   color-scheme: light dark;
-  --canvas: #f6f8f7;
+  --canvas: #f6f7fb;
   --surface: #ffffff;
-  --surface-subtle: #ecf1f0;
-  --text: #202a2b;
-  --text-muted: #506062;
-  --border: #d6dfdd;
-  --border-control: #788b8d;
-  --accent: #245d6b;
-  --accent-hover: #1b4a55;
+  --surface-subtle: #edeff6;
+  --text: #1e2233;
+  --text-muted: #525971;
+  --border: #d9dce7;
+  --border-control: #787f99;
+  --accent: #3a4fbf;
+  --accent-hover: #2e3f9c;
   --accent-text: #ffffff;
   --danger: #a53636;
   --danger-hover: #862b2b;
@@ -23,7 +23,7 @@
   --strength-strong: #31834b;
   --focus: var(--accent);
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
-  --backdrop: rgb(14 22 24 / 0.56);
+  --backdrop: rgb(14 15 24 / 0.56);
   --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.16);
   /* The terminal's own background stands in until a theme is applied, tuned to
      the Tokyo Night default so the first paint does not flash. */
@@ -67,27 +67,27 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #151c1e;
-    --surface: #1d2729;
-    --surface-subtle: #263235;
-    --text: #e6edef;
-    --text-muted: #aab9bb;
-    --border: #39484b;
-    --border-control: #74888a;
-    --accent: #75c1d1;
-    --accent-hover: #95d2de;
-    --accent-text: #151c1e;
+    --canvas: #15161e;
+    --surface: #1e202b;
+    --surface-subtle: #282b39;
+    --text: #e4e7f2;
+    --text-muted: #a9afc7;
+    --border: #363a4d;
+    --border-control: #777e9b;
+    --accent: #8fa3f7;
+    --accent-hover: #adbcfa;
+    --accent-text: #15161e;
     --danger: #f09994;
     --danger-hover: #f5b5b1;
     --danger-text: #2a1414;
-    --danger-surface: #342326;
+    --danger-surface: #33232b;
     --danger-border: #8a5452;
     --strength-weak: #e06f68;
     --strength-fair: #e5ae45;
     --strength-good: #a4c75c;
     --strength-strong: #65bd7b;
     --selection: color-mix(in srgb, var(--accent) 30%, transparent);
-    --backdrop: rgb(4 8 9 / 0.68);
+    --backdrop: rgb(4 5 10 / 0.68);
     --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.4);
   }
 }
@@ -1225,6 +1225,15 @@ body:has(.app-shell--connect) {
 /* The keyboard toggle acts on the page rather than sending anything to the
    host, so it is given a gap and a firmer edge to keep it out of the run of
    keys beside it. */
+/* The measured keys share what the 44px-per-key capacity count leaves over, so
+   no empty slot sits before More. KeyBar measures .key-bar__keys, which this
+   growth does not change. */
+.key-bar__keys .key-bar__key {
+  flex: 1 1 var(--target);
+  width: auto;
+  max-width: 64px;
+}
+
 .key-bar__key--keyboard {
   display: flex;
   flex-direction: column;
@@ -1259,10 +1268,10 @@ body:has(.app-shell--connect) {
 /* Takes the system keyboard's place: up to four rows of keys, never more than
    40 percent of the visual viewport, scrolling inside past that. */
 .key-bar-panel {
-  display: flex;
+  display: grid;
   flex: none;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  grid-template-columns: repeat(auto-fill, minmax(var(--target), 1fr));
+  align-content: start;
   gap: 4px;
   max-height: min(calc(4 * var(--target) + 3 * 4px + 12px), calc(var(--app-height, 100dvh) * 0.4));
   padding: 6px max(var(--space-2), env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom))
@@ -1275,7 +1284,13 @@ body:has(.app-shell--connect) {
   user-select: none;
 }
 
+.key-bar-panel .key-bar__key {
+  width: auto;
+  height: var(--target);
+}
+
 .key-bar-panel__empty {
+  grid-column: 1 / -1;
   margin: 0;
   padding: var(--space-2);
   color: var(--text-muted);
@@ -1287,7 +1302,7 @@ body:has(.app-shell--connect) {
 }
 
 .key-bar__key--glyph {
-  font-size: 1.05rem;
+  font-size: 1rem;
 }
 
 .key-bar__key:active {
@@ -2689,21 +2704,29 @@ p > .learn-more::after {
 
 @media (max-width: 719px) {
   .app-shell--session .app-toolbar {
+    gap: var(--space-2);
     min-height: calc(44px + env(safe-area-inset-top));
     max-height: calc(60px + env(safe-area-inset-top));
+    padding-inline: max(var(--space-3), env(safe-area-inset-left))
+      max(var(--space-3), env(safe-area-inset-right));
   }
 
   .app-shell--session .toolbar-brand {
     display: none;
   }
 
-  .app-shell--session .session-identity--switcher {
+  /* Three classes, so the 12px identity inset below (and the 0 padding of the
+     combined toolbar) cannot win: the toolbar already insets the text. */
+  .app-shell--session .app-toolbar .session-identity--switcher {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    align-content: center;
     column-gap: var(--space-2);
+    row-gap: var(--space-1);
     min-height: var(--target);
-    padding: 0;
+    padding: 6px 0;
     border: 0;
+    color: var(--text-muted);
     background: none;
     text-align: left;
     cursor: pointer;
@@ -2723,6 +2746,10 @@ p > .learn-more::after {
     grid-column: 2;
     grid-row: 1 / 3;
     align-self: center;
+  }
+
+  .session-identity--switcher[aria-expanded="true"] > svg {
+    color: var(--text);
   }
 
   .terminal-tabs--switcher {
@@ -2747,7 +2774,8 @@ p > .learn-more::after {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-left: var(--space-3);
+    min-height: var(--target);
+    padding-left: var(--space-2);
     font-weight: 600;
   }
 
@@ -2766,9 +2794,14 @@ p > .learn-more::after {
     justify-content: center;
     max-width: none;
     min-width: 0;
-    padding-block: var(--space-2);
-    line-height: 1.3;
+    padding: var(--space-2);
+    row-gap: 2px;
+    line-height: var(--leading-body);
     white-space: normal;
+  }
+
+  .terminal-tabs--switcher [role="tab"]:not([aria-selected="true"]) {
+    font-weight: 500;
   }
 
   .terminal-tabs--switcher .terminal-tabs__host {
@@ -2782,10 +2815,21 @@ p > .learn-more::after {
     overflow-wrap: anywhere;
     color: var(--text-muted);
     font-size: var(--text-meta);
+    line-height: var(--leading-meta);
+  }
+
+  /* The target looks the same here as in the header. */
+  .terminal-tabs--switcher .terminal-tabs__target {
+    font-family: var(--mono);
+    font-size: var(--text-secondary);
+    font-weight: 400;
+    line-height: var(--leading-secondary);
   }
 
   .terminal-tabs--switcher .terminal-tabs__new {
+    gap: var(--space-2);
     min-height: var(--target);
+    padding-inline: var(--space-2);
   }
 
   .app-toolbar {
@@ -3039,6 +3083,21 @@ p > .learn-more::after {
     padding: 0;
   }
 
+  .settings-dialog__header {
+    padding: var(--space-3) max(var(--space-4), env(safe-area-inset-right)) var(--space-3)
+      max(var(--space-4), env(safe-area-inset-left));
+  }
+
+  .settings-dialog__body h3 {
+    font-size: var(--text-body);
+    font-weight: 600;
+    line-height: var(--leading-body);
+  }
+
+  .settings-dialog__body h3:not(:first-child) {
+    margin-top: var(--space-3);
+  }
+
   .settings-dialog {
     width: 100%;
     height: var(--app-height, 100dvh);
@@ -3109,4 +3168,13 @@ p > .learn-more::after {
   flex-basis: 100%;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* viewportHeight.ts sets data-keyboard while the software keyboard covers the
+   screen's bottom. The keyboard then sits where the home indicator was, so the
+   safe-area inset would only leave a dead band above it. */
+:root[data-keyboard="open"] .key-bar,
+:root[data-keyboard="open"] .key-bar-panel,
+:root[data-keyboard="open"] .recovery-row {
+  padding-bottom: 6px;
 }
