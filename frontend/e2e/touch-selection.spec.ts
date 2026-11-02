@@ -168,7 +168,11 @@ test("the selectable text layer mirrors the live rows and hides from screen read
 
 test("long press on visible text creates a DOM selection in the text layer", async ({ page }) => {
   await connect(page);
+  // Off the prompt row, which is the input field kept for Paste. The test
+  // server echoes Enter as a bare CR, so Ctrl+J adds the line feed.
   await typeInShell(page, "selectme");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+J");
   await expect(page.locator(".terminal-touch-text")).toContainText("selectme");
 
   const point = await centreOf(page, "selectme");
@@ -290,9 +294,7 @@ test.describe("desktop", () => {
   });
 });
 
-test("the input field covers only the cursor row, so a focused keyboard leaves other rows selectable", async ({
-  page,
-}) => {
+test("the input field covers the whole cursor row and nothing else", async ({ page }) => {
   await connect(page);
   await typeInShell(page, "rowcheck");
   await page.locator(".xterm-screen").tap();
@@ -308,26 +310,40 @@ test("the input field covers only the cursor row, so a focused keyboard leaves o
       screen.left + screen.width / 2,
       field.top - row.height * 1.5,
     );
+    const hitPrompt = document.elementFromPoint(screen.left + 4, field.top + field.height / 2);
     return {
       fieldHeight: field.height,
       rowHeight: row.height,
+      fieldLeft: field.left,
       fieldRight: field.right,
+      screenLeft: screen.left,
       screenRight: screen.right,
       aboveIsField: !!hitAbove?.closest(".xterm-helper-textarea"),
+      promptIsField: !!hitPrompt?.closest(".xterm-helper-textarea"),
+      opacity: getComputedStyle(document.querySelector(".xterm-helper-textarea")!).opacity,
     };
   });
   expect(layout.fieldHeight).toBeCloseTo(layout.rowHeight, 0);
+  // The whole prompt row is the field, so a long press there offers Paste.
+  expect(Math.abs(layout.fieldLeft - layout.screenLeft)).toBeLessThanOrEqual(1);
+  expect(layout.promptIsField).toBe(true);
+  // iOS WebKit shows no caret, handles, Copy, or Paste while the focused field
+  // has near-zero opacity, so the field stays opaque and hides by colour.
+  expect(layout.opacity).toBe("1");
   expect(Math.abs(layout.fieldRight - layout.screenRight)).toBeLessThanOrEqual(1);
   expect(layout.aboveIsField).toBe(false);
 });
 
-test("a selection in the text layer drops the keyboard so iOS can show Copy", async ({ page }) => {
+test("a selection in the text layer keeps the keyboard field focused", async ({ page }) => {
+  // On an iPhone, blurring the field cleared a selection Safari had just made
+  // with the keyboard up, so the selection must not move focus.
   await connect(page);
-  await typeInShell(page, "dropkeys");
-  await expect(page.locator(".terminal-touch-text")).toContainText("dropkeys");
+  await typeInShell(page, "keepkeys");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+J");
+  await expect(page.locator(".terminal-touch-text")).toContainText("keepkeys");
   await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
 
-  // A selection made by the browser itself, as Safari's long press does.
   await page.evaluate(() => {
     const text = document.querySelector(".terminal-touch-text > div")!;
     const range = document.createRange();
@@ -335,6 +351,55 @@ test("a selection in the text layer drops the keyboard so iOS can show Copy", as
     document.getSelection()!.removeAllRanges();
     document.getSelection()!.addRange(range);
   });
-  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+  await page.waitForTimeout(200);
+  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
   expect(await page.evaluate(() => document.getSelection()?.toString().length)).toBeGreaterThan(0);
+});
+
+test("touches on the text and the field are left to the browser's own long press", async ({
+  page,
+}) => {
+  await connect(page);
+  await typeInShell(page, "native");
+  await expect(page.locator(".terminal-touch-text")).toContainText("native");
+  const text = await centreOf(page, "native");
+  const field = await page.locator(".xterm-helper-textarea").evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return { x: box.left + 4, y: box.top + box.height / 2 };
+  });
+  const prevented = await page.evaluate(
+    (points) =>
+      points.map(({ x, y }) => {
+        Element.prototype.setPointerCapture = () => {};
+        const target = document.elementFromPoint(x, y)!;
+        const down = new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 9,
+          pointerType: "touch",
+          clientX: x,
+          clientY: y,
+        });
+        target.dispatchEvent(down);
+        target.dispatchEvent(
+          new PointerEvent("pointercancel", { bubbles: true, pointerId: 9, pointerType: "touch" }),
+        );
+        return down.defaultPrevented;
+      }),
+    [text, field],
+  );
+  expect(prevented).toEqual([false, false]);
+});
+
+test("a long press on the prompt row selects nothing, leaving it for Paste", async ({ page }) => {
+  await connect(page);
+  await typeInShell(page, "promptrow");
+  const field = await page.locator(".xterm-helper-textarea").evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return { x: box.left + 4, y: box.top + box.height / 2 };
+  });
+  await touchEvent(page, "pointerdown", field.x, field.y);
+  await page.waitForTimeout(900);
+  expect(await page.evaluate(() => document.getSelection()?.toString())).toBe("");
+  await touchEvent(page, "pointerup", field.x, field.y);
 });

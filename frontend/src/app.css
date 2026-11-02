@@ -604,10 +604,9 @@ body:has(.app-shell--connect) {
 }
 
 /* Touch devices: Terminal.tsx puts an invisible, selectable copy of the visible
-   rows over the screen and widens xterm's input field along the cursor row. A
+   rows over the screen and widens xterm's input field across the cursor row. A
    long press on text selects it with the browser's own handles and Copy
-   callout; a press on the prompt line after the cursor reaches the field and
-   offers Paste. The copy has xterm's own row class, so it shares the live
+   callout; a long press on the prompt line reaches the field and offers Paste. The copy has xterm's own row class, so it shares the live
    rows' font and row height. */
 /* The layers below stack inside the terminal, so panels drawn over it (Files,
    menus) stay above them and keep receiving taps. */
@@ -617,17 +616,25 @@ body:has(.app-shell--connect) {
 
 .terminal-host--touch .xterm-helpers {
   inset: 0;
-  z-index: 1 !important;
+  z-index: 4 !important;
   pointer-events: none;
 }
 
-/* xterm places the field on the cursor cell (inline left, top, height). It is
-   widened only to the right edge of that row: a focused field that covered the
-   whole screen would take every long press for its own caret, so text above
-   could not be selected while the keyboard is up. */
+/* xterm places the field on the cursor row (inline top and height). It spans
+   that whole row and sits above the text copy, so a long press on the prompt
+   line offers Paste instead of selecting the prompt. It covers no other row: a
+   focused field over the whole screen would take every long press for its own
+   caret. */
+/* Opaque, hidden by colour: iOS WebKit shows no caret, selection handles,
+   Copy, or Paste while the focused field has near-zero opacity
+   (https://bugs.webkit.org/show_bug.cgi?id=191442). */
 .terminal-host--touch .xterm-helper-textarea {
-  right: 0 !important;
-  width: auto !important;
+  left: 0 !important;
+  width: 100% !important;
+  opacity: 1 !important;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
   pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;

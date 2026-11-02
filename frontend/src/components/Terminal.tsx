@@ -357,11 +357,18 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     // Let the browser keep or dismiss its selection; no swipe, scroll, or tap.
     if (targets.textLayer?.hasSelection()) return;
 
-    // Keep Safari from turning the long press into page movement or its native
-    // callout. Capturing also keeps the drag alive when a thumb strays outside
-    // the terminal before it is released.
-    event.preventDefault();
-    element.setPointerCapture?.(event.pointerId);
+    // A touch on the selectable text or the input field belongs to Safari's own
+    // long press (selection and Copy, or Paste); preventing it would stop that.
+    // Elsewhere, keep Safari from turning a long press into page movement or its
+    // callout, and capture so a drag stays alive when a thumb strays outside.
+    const target = event.target instanceof Element ? event.target : null;
+    const onField = !!target?.closest(".xterm-helper-textarea");
+    const nativeTouch =
+      !!targets.textLayer && (onField || !!target?.closest(".terminal-touch-text"));
+    if (!nativeTouch) {
+      event.preventDefault();
+      element.setPointerCapture?.(event.pointerId);
+    }
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (active.size === 1) {
@@ -381,7 +388,8 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       const { clientX, clientY } = event;
       longPressTimer = window.setTimeout(() => {
         const layer = targets.textLayer;
-        if (!layer) return;
+        // The prompt row is the input field, kept for Paste.
+        if (!layer || onField) return;
         handled = true;
         // Touch Safari selects by itself first; select the word only when it did not.
         if (!layer.hasSelection()) selectWordAt(layer.mirror, clientX, clientY);
