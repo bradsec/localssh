@@ -10,7 +10,7 @@ export default defineConfig({
       : "../engine/build.sh && npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
-    env: { VITE_RELAY_WS_URL: "ws://127.0.0.1:8787" },
+    env: { VITE_RELAY_WS_URL: `ws://127.0.0.1:${process.env.E2E_RELAY_PORT ?? "8787"}` },
     gracefulShutdown: { signal: "SIGTERM", timeout: 2_000 },
   },
   use: {

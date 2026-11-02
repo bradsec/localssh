@@ -63,3 +63,6 @@ npx tsc -b --pretty false
 npm run build
 npm run test:e2e
 ```
+
+Set `E2E_RELAY_PORT` when port 8787 is occupied, for example
+`E2E_RELAY_PORT=18787 npm run test:e2e`.

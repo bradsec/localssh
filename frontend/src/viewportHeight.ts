@@ -20,6 +20,7 @@
 
 /** The part of `window.visualViewport` this needs, so a test can supply one. */
 export interface ViewportLike {
+  width: number;
   height: number;
   /** How far the visual viewport has been panned down the layout viewport. */
   offsetTop: number;
@@ -44,13 +45,18 @@ export const VIEWPORT_SAMPLE_INTERVAL_MS = 100;
  * `root`, keeping them current as the keyboard opens and closes, and returns a
  * function that stops tracking and removes the properties.
  */
-export function trackViewportHeight(viewport: ViewportLike, root: HTMLElement): () => void {
+export function trackViewportHeight(
+  viewport: ViewportLike,
+  root: HTMLElement,
+  onSample?: () => void,
+): () => void {
   let publishedHeight = "";
   let publishedOffset = "";
 
   // Floor rather than round: a height rounded up past the real viewport gives
   // the page a sliver to scroll, and iOS then drifts the whole layout upward.
   const apply = () => {
+    onSample?.();
     const height = `${Math.floor(viewport.height)}px`;
     const offset = `${Math.round(viewport.offsetTop)}px`;
     // Writing only on a change keeps the timer below off the style path, and

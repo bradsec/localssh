@@ -1,4 +1,19 @@
 import { loadEngine } from "../ssh/engine.js";
+import {
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+} from "../storage/settingsStore.js";
+import { TERMINAL_FONTS } from "../terminalFonts.js";
+import { TERMINAL_THEMES } from "../terminalThemes.js";
+
+export interface TerminalPrefs {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  themeName: string;
+}
 
 /**
  * An entry as the page sees it. There is deliberately no password field: the
@@ -12,6 +27,7 @@ export interface SavedEntry {
   port: number;
   username?: string;
   hasPassword: boolean;
+  terminal?: TerminalPrefs;
 }
 
 /**
@@ -26,6 +42,7 @@ export interface EntryInput {
   port: number;
   username: string;
   password?: string;
+  terminal?: TerminalPrefs | null;
 }
 
 export class WrongPasswordError extends Error {
@@ -96,6 +113,9 @@ export async function lockVault(): Promise<void> {
 // with that value. Building the object explicitly keeps "absent" and "empty"
 // distinguishable, which is the whole keep-or-clear contract.
 function encodeInput(input: EntryInput): string {
+  if (input.terminal != null && !isTerminalPrefs(input.terminal)) {
+    throw new Error("Invalid terminal preferences.");
+  }
   const wire: Record<string, unknown> = {
     id: input.id,
     nickname: input.nickname,
@@ -104,6 +124,7 @@ function encodeInput(input: EntryInput): string {
     username: input.username,
   };
   if (input.password !== undefined) wire.password = input.password;
+  if (input.terminal !== undefined) wire.terminal = input.terminal;
   return JSON.stringify(wire);
 }
 
@@ -124,7 +145,28 @@ function isSavedEntry(value: unknown): value is SavedEntry {
     typeof entry.host === "string" &&
     Number.isInteger(entry.port) &&
     (entry.username === undefined || typeof entry.username === "string") &&
-    typeof entry.hasPassword === "boolean"
+    typeof entry.hasPassword === "boolean" &&
+    (entry.terminal === undefined || isTerminalPrefs(entry.terminal))
+  );
+}
+
+function isTerminalPrefs(value: unknown): value is TerminalPrefs {
+  if (typeof value !== "object" || value === null) return false;
+  const prefs = value as Record<string, unknown>;
+  return (
+    typeof prefs.fontFamily === "string" &&
+    TERMINAL_FONTS.some((font) => font.value === prefs.fontFamily) &&
+    typeof prefs.fontSize === "number" &&
+    Number.isInteger(prefs.fontSize) &&
+    prefs.fontSize >= FONT_SIZE_MIN &&
+    prefs.fontSize <= FONT_SIZE_MAX &&
+    typeof prefs.lineHeight === "number" &&
+    Number.isFinite(prefs.lineHeight) &&
+    prefs.lineHeight >= LINE_HEIGHT_MIN &&
+    prefs.lineHeight <= LINE_HEIGHT_MAX &&
+    Math.abs(prefs.lineHeight * 20 - Math.round(prefs.lineHeight * 20)) <= 1e-9 &&
+    typeof prefs.themeName === "string" &&
+    Object.hasOwn(TERMINAL_THEMES, prefs.themeName)
   );
 }
 

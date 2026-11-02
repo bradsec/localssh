@@ -43,6 +43,16 @@ describe("describeConnectionFailure", () => {
     ],
     ["ssh handshake: ssh: handshake failed: host key rejected", "host-key", "host-key"],
     ["connection lost", "connection-lost", "troubleshooting"],
+    ["relay connection closed: expired", "session-expired", "troubleshooting"],
+    ["relay connection closed: superseded", "session-expired", "troubleshooting"],
+    ["relay connection closed: retention_exceeded", "session-expired", "troubleshooting"],
+    ["relay connection closed: offset_mismatch", "session-expired", "troubleshooting"],
+    ["relay connection closed: resume_disabled", "session-expired", "troubleshooting"],
+    ["connection lost: relay session expired", "session-expired", "troubleshooting"],
+    ["connection lost: relay session superseded", "session-expired", "troubleshooting"],
+    ["connection lost: relay session offset_mismatch", "session-expired", "troubleshooting"],
+    ["connection lost: relay session retention_exceeded", "session-expired", "troubleshooting"],
+    ["relay resume disabled", "session-expired", "troubleshooting"],
     ["connection lost: relay connection closed (code 1006)", "connection-lost", "troubleshooting"],
     [
       "ssh handshake: ssh: handshake failed: relay connection closed: target connection error (code 1011)",
@@ -67,6 +77,13 @@ describe("describeConnectionFailure", () => {
       expect.stringMatching(/origin.*ALLOWED_ORIGINS/),
       expect.stringMatching(/session limit.*MAX_SESSIONS/),
     ]);
+  });
+
+  it("shows the recovery cause for a relay session expiry", () => {
+    expect(describeConnectionFailure("relay session expired")).toMatchObject({
+      message: "Session expired.",
+      recovery: "The connection to the server was lost. Reconnect to start a new session.",
+    });
   });
 
   it("matches a relay reason, not a host name that contains one", () => {

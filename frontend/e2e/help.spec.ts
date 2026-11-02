@@ -63,15 +63,27 @@ test("explains a refused connection and links to the matching Help topic", async
   await fillConnectForm(page, "127.0.0.1", "1");
 
   const alert = page.getByRole("alert");
-  await expect(alert).toContainText("The server refused the connection.");
   await alert.getByText("Technical details").click();
-  await expect(alert).toContainText("target connection refused");
+  await expect(alert).toContainText("relay connection closed: target connection refused");
+  await expect(alert).toContainText("The server refused the connection.");
 
   await alert.getByRole("button", { name: "Learn more about connection problems" }).click();
   const dialog = page.getByRole("dialog", { name: "Help with localssh" });
   await expect(dialog.getByRole("heading", { name: "Fix a connection problem" })).toBeFocused();
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toHaveCount(0);
+});
+
+test("keeps target refusal details on a v1 relay", async ({ page }) => {
+  await page.route("**/capabilities", (route) =>
+    route.fulfill({ json: { resume: false, maxGraceMs: null } }),
+  );
+  await page.goto("/");
+  await fillConnectForm(page, "127.0.0.1", "1");
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("The server refused the connection.");
+  await alert.getByText("Technical details").click();
+  await expect(alert).toContainText("relay connection closed: target connection refused");
 });
 
 test("names a failed login as an authentication problem", async ({ page }) => {

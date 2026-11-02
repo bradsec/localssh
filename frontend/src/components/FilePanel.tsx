@@ -12,19 +12,22 @@ import { describeSftpFailure } from "../connectionErrors.js";
 import {
   openFiles,
   type DownloadResult,
+  REMOTE_FILE_CHANGED,
   REMOTE_FILE_EXISTS,
   type RemoteFile,
   type SftpHandle,
   type SshHandle,
 } from "../ssh/engine.js";
-import {
-  displayName,
-  DOWNLOAD_KEEP_MS,
-  DOWNLOAD_PREFIX,
-  originDirectory,
-  sweepDownloads,
-} from "../remoteFiles.js";
+import { displayName, DOWNLOAD_KEEP_MS, originDirectory, sweepDownloads } from "../remoteFiles.js";
 import type { CSSProperties } from "react";
+import {
+  type DownloadRecord,
+  deleteRecord,
+  listRecords,
+  openSegmentedDownload,
+  recordIsUsable,
+  segmentName,
+} from "../downloadStore.js";
 import { LearnMore } from "./Help.js";
 import { useToast } from "../toast.js";
 import {
@@ -92,7 +95,7 @@ function describeEntry(entry: RemoteFile): string {
 /** A finished download held in browser storage so the user can save it. */
 interface HeldDownload {
   url: string;
-  release: () => void;
+  release: () => void | Promise<void>;
   result?: DownloadResult;
 }
 
@@ -105,52 +108,84 @@ function saveLink(url: string, filename: string) {
   link.remove();
 }
 
+/** A closed connection keeps the partial download for a later resume. */
+const CONNECTION_CLOSED = /file connection is closed|SFTP closed|connection closed/i;
+const TRANSFER_CANCELLED = /transfer cancelled/i;
+
+export interface TransferIdentity {
+  host: string;
+  port: number;
+  username: string;
+}
+
+/**
+ * Records of downloads running or held in this page. Files opened in another
+ * tab for the same host must not offer them as stopped downloads.
+ */
+const activeDownloads = new Set<string>();
+
+function committedPercent(record: DownloadRecord): number {
+  return record.size > 0 ? Math.floor((record.committedBytes * 100) / record.size) : 0;
+}
+
+/**
+ * Downloads record.remotePath into segments named by the record. With resume,
+ * it continues from the record's committed bytes and the engine checks that
+ * the remote file is unchanged.
+ */
 async function receiveFile(
   files: SftpHandle,
-  remotePath: string,
+  record: DownloadRecord,
+  resume: boolean,
   filename: string,
   onProgress: (percent: number) => void,
 ): Promise<HeldDownload> {
   const directory = await originDirectory();
   if (directory) {
-    const tempName = `${DOWNLOAD_PREFIX}${crypto.randomUUID()}`;
-    let writable: FileSystemWritableFileStream | null = null;
+    const id = record.id;
+    let writer: Awaited<ReturnType<typeof openSegmentedDownload>> | null = null;
     let downloading = false;
+    activeDownloads.add(id);
     try {
-      const handle = await directory.getFileHandle(tempName, { create: true });
+      const segmented = await openSegmentedDownload(directory, record);
+      writer = segmented;
       // Safari before 26 has origin storage without createWritable; fall
       // through to the bounded in-memory path below.
-      if (typeof handle.createWritable === "function") {
-        writable = await handle.createWritable();
-        const stream = writable;
+      const probe = await directory.getFileHandle(segmentName(id, 0), { create: true });
+      if (typeof probe.createWritable === "function") {
         downloading = true;
-        const result = await files.download(
-          remotePath,
-          async (chunk) => {
-            await stream.write(chunk.slice().buffer);
-          },
-          onProgress,
-        );
-        await stream.close();
-        const url = URL.createObjectURL(await handle.getFile());
+        const write = (chunk: Uint8Array) => segmented.write(chunk);
+        const result = resume
+          ? await files.download(record.remotePath, write, onProgress, {
+              offset: record.committedBytes,
+              expectSize: record.size,
+              expectMtime: record.mtime,
+              tail: await segmented.tail(),
+            })
+          : await files.download(record.remotePath, write, onProgress);
+        const url = URL.createObjectURL(await segmented.finish());
         saveLink(url, filename);
-        // The saved file and the Save download link read from this copy, so
-        // it stays until the next transfer, panel close, page hide, or timer.
+        // The saved file and the Save download link read from the segments, so
+        // they stay until the next transfer, panel close, page hide, or timer.
         return {
           url,
           result,
           release: () => {
             URL.revokeObjectURL(url);
-            void directory.removeEntry(tempName).catch(console.error);
+            activeDownloads.delete(id);
+            return deleteRecord(directory, id).catch(console.error);
           },
         };
       }
-      await directory.removeEntry(tempName);
+      activeDownloads.delete(id);
+      await deleteRecord(directory, id);
     } catch (error) {
-      if (writable) await writable.abort().catch(console.error);
-      await directory.removeEntry(tempName).catch(console.error);
+      activeDownloads.delete(id);
+      if (writer) await writer.abort().catch(console.error);
+      // Once data has moved, the caller decides whether the partial bytes stay.
       if (downloading) throw error;
       // Storage failed before any data moved: try the in-memory path.
+      await deleteRecord(directory, id).catch(console.error);
       console.error(error);
     }
   }
@@ -158,7 +193,7 @@ async function receiveFile(
   const chunks: ArrayBuffer[] = [];
   let size = 0;
   const result = await files.download(
-    remotePath,
+    record.remotePath,
     async (chunk) => {
       size += chunk.byteLength;
       if (size > FALLBACK_LIMIT)
@@ -172,6 +207,44 @@ async function receiveFile(
   return { url, result, release: () => URL.revokeObjectURL(url) };
 }
 
+/**
+ * A download that ended with its partial bytes kept or just discarded:
+ * X-05 failed (resumable), X-06 the remote file changed, X-07 the session
+ * ended (found in storage when Files opens).
+ */
+interface StoppedDownload {
+  state: "failed" | "changed" | "ended";
+  id: string;
+  remotePath: string;
+  name: string;
+  percent: number;
+  detail?: string;
+  canResume: boolean;
+}
+
+function newRecord(
+  identity: TransferIdentity,
+  remotePath: string,
+  remote: { size: number; mtime: number },
+): DownloadRecord {
+  return {
+    id: crypto.randomUUID(),
+    host: identity.host,
+    port: identity.port,
+    user: identity.username,
+    remotePath,
+    size: remote.size,
+    mtime: remote.mtime,
+    committedBytes: 0,
+    segments: [],
+    createdAt: Date.now(),
+  };
+}
+
+function remoteBase(remotePath: string): string {
+  return remotePath.slice(remotePath.lastIndexOf("/") + 1);
+}
+
 type HeldSlot = { download: HeldDownload; timer: number } | null;
 
 function releaseHeld(slot: { current: HeldSlot }) {
@@ -181,17 +254,41 @@ function releaseHeld(slot: { current: HeldSlot }) {
   slot.current = null;
 }
 
+export interface FilePanelProps {
+  handle: SshHandle;
+  onClose: () => void;
+  expanded: boolean;
+  onExpand: () => void;
+  /** "resuming" while the tab's transport is reconnecting (S-13). */
+  transport: "connected" | "resuming";
+  /** Names the partial download record; holds no credentials. */
+  identity: TransferIdentity;
+  /**
+   * Reports a download's progress, and null when it ends for a reason other
+   * than a lost connection. A lost connection leaves the last report so the
+   * recovery row can say where the download stopped.
+   */
+  onDownloadStop?: (info: { name: string; percent: number } | null) => void;
+}
+
+function pageHidden() {
+  return document.visibilityState === "hidden";
+}
+
+function subscribeVisibility(onChange: () => void) {
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+
 export function FilePanel({
   handle,
   onClose,
   expanded,
   onExpand,
-}: {
-  handle: SshHandle;
-  onClose: () => void;
-  expanded: boolean;
-  onExpand: () => void;
-}) {
+  transport,
+  identity,
+  onDownloadStop,
+}: FilePanelProps) {
   const toast = useToast();
   const pathId = useId();
   const [files, setFiles] = useState<SftpHandle | null>(null);
@@ -224,20 +321,73 @@ export function FilePanel({
   // scroll offset alone; touch screens keep the 44px target.
   const rowHeight = useSyncExternalStore(subscribePointer, coarsePointer) ? 44 : 32;
   const cancelled = useRef(false);
+  const mounted = useRef(true);
   const [downloadLink, setDownloadLink] = useState<{ url: string; name: string } | null>(null);
   const [failure, setFailure] = useState<{ raw: string; path: string; name: string } | null>(null);
   const held = useRef<HeldSlot>(null);
   const releaseDownload = () => releaseHeld(held);
+  const hidden = useSyncExternalStore(subscribeVisibility, pageHidden);
+  const resuming = transport === "resuming";
+  // Controls that start or change a transfer stay off while a transfer runs
+  // or the session is resuming; Cancel and Close files stay available.
+  const locked = !!busy || resuming;
+  const [announced, setAnnounced] = useState<{
+    key: string;
+    state: string | null;
+    text: string;
+  }>({ key: "", state: null, text: "" });
+  const touch = useSyncExternalStore(subscribePointer, coarsePointer);
+  const [stopped, setStopped] = useState<StoppedDownload | null>(null);
+  const [stoppedVersion, setStoppedVersion] = useState(0);
+  const { host, port, username } = identity;
 
   useEffect(() => {
+    mounted.current = true;
     void sweepDownloads().catch(console.error);
     const onHide = () => releaseHeld(held);
     window.addEventListener("pagehide", onHide);
     return () => {
+      mounted.current = false;
       window.removeEventListener("pagehide", onHide);
       releaseHeld(held);
     };
   }, []);
+
+  // X-07: a download of this host, port and user that a lost session or a
+  // reload left in storage.
+  useEffect(() => {
+    let disposed = false;
+    void (async () => {
+      const directory = await originDirectory();
+      if (!directory) return;
+      const latest = (await listRecords())
+        .filter(
+          (record) =>
+            record.host === host &&
+            record.port === port &&
+            record.user === username &&
+            !activeDownloads.has(record.id),
+        )
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (!latest) return;
+      const canResume = await recordIsUsable(directory, latest);
+      if (disposed) return;
+      setStopped(
+        (current) =>
+          current ?? {
+            state: "ended",
+            id: latest.id,
+            remotePath: latest.remotePath,
+            name: displayName(remoteBase(latest.remotePath)),
+            percent: committedPercent(latest),
+            canResume,
+          },
+      );
+    })().catch(console.error);
+    return () => {
+      disposed = true;
+    };
+  }, [host, port, username, stoppedVersion]);
 
   useEffect(() => {
     let disposed = false;
@@ -324,13 +474,14 @@ export function FilePanel({
     }
   };
 
-  const startTransfer = (kind: "upload" | "download", name: string) => {
+  const startTransfer = (kind: "upload" | "download", name: string, percent = 0) => {
     releaseDownload();
     setPendingReplace(null);
     setFailure(null);
+    setStopped(null);
     cancelled.current = false;
     setDownloadLink(null);
-    setBusy({ kind, name, percent: 0 });
+    setBusy({ kind, name, percent });
   };
 
   const upload = async (file: File, overwrite: boolean) => {
@@ -357,15 +508,38 @@ export function FilePanel({
     }
   };
 
-  const download = async (entry: RemoteFile) => {
+  const download = async (
+    remotePath: string,
+    shown: string,
+    remote: { size: number; mtime: number },
+    resume?: DownloadRecord,
+  ) => {
     if (!files) return;
-    const remotePath = remoteJoin(path, entry.name);
-    const shown = displayName(entry.name);
-    startTransfer("download", shown);
+    const record = resume ?? newRecord({ host, port, username }, remotePath, remote);
+    const startPercent = resume ? committedPercent(resume) : 0;
+    let released: Promise<void> | undefined;
+    startTransfer("download", shown, startPercent);
+    onDownloadStop?.({ name: shown, percent: startPercent });
     try {
-      const received = await receiveFile(files, remotePath, shown, (percent) =>
-        setBusy({ kind: "download", name: shown, percent }),
-      );
+      const received = await receiveFile(files, record, !!resume, shown, (percent) => {
+        setBusy({ kind: "download", name: shown, percent });
+        onDownloadStop?.({ name: shown, percent });
+      });
+      if (resume) {
+        let resolveRelease!: () => void;
+        released = new Promise<void>((resolve) => {
+          resolveRelease = resolve;
+        });
+        const originalRelease = received.release;
+        received.release = async () => {
+          try {
+            await originalRelease();
+          } finally {
+            resolveRelease();
+          }
+        };
+      }
+      onDownloadStop?.(null);
       held.current = {
         download: received,
         timer: window.setTimeout(() => {
@@ -374,6 +548,7 @@ export function FilePanel({
         }, DOWNLOAD_KEEP_MS),
       };
       setDownloadLink({ url: received.url, name: shown });
+      setStoppedVersion((version) => version + 1);
       toast(
         received.result?.grew
           ? `The file grew while downloading. Saved the first ${received.result.size.toLocaleString()} bytes.`
@@ -381,11 +556,135 @@ export function FilePanel({
         received.result?.grew ? "warning" : "success",
       );
     } catch (error) {
-      toast(describeSftpFailure(String(error), displayName(remotePath), shown).message, "error");
+      const raw = String(error);
+      // When the session ends, the engine closes the file connection, which
+      // cancels the transfer. A cancel the user did not ask for, a closed
+      // connection, or Files unmounting keeps the partial bytes; a user cancel
+      // or any other failure discards them.
+      const lost =
+        !cancelled.current &&
+        (!mounted.current || CONNECTION_CLOSED.test(raw) || TRANSFER_CANCELLED.test(raw));
+      if (!lost) {
+        const directory = await originDirectory();
+        if (directory) await deleteRecord(directory, record.id).catch(console.error);
+        onDownloadStop?.(null);
+      }
+      if (!mounted.current) return;
+      const stoppedAt = { id: record.id, remotePath, name: shown };
+      if (raw.includes(REMOTE_FILE_CHANGED)) {
+        setStopped({ ...stoppedAt, state: "changed", percent: 0, canResume: false });
+        return;
+      }
+      // Only the segmented path keeps a record; the in-memory one cannot resume.
+      const kept = lost
+        ? (await listRecords().catch(() => [])).find((item) => item.id === record.id)
+        : undefined;
+      if (kept) {
+        setStopped({
+          ...stoppedAt,
+          state: "failed",
+          percent: committedPercent(kept),
+          detail: describeSftpFailure(raw, displayName(remotePath), shown).message,
+          canResume: true,
+        });
+        return;
+      }
+      toast(describeSftpFailure(raw, displayName(remotePath), shown).message, "error");
     } finally {
       setBusy(null);
     }
+    await released;
   };
+
+  const discardStopped = async (item: StoppedDownload) => {
+    setStopped(null);
+    onDownloadStop?.(null);
+    const directory = await originDirectory();
+    if (directory) await deleteRecord(directory, item.id);
+    setStoppedVersion((version) => version + 1);
+  };
+
+  // Retry downloads the whole file again, so it needs the current size and mtime.
+  const retryStopped = async (item: StoppedDownload) => {
+    if (!files) return;
+    await discardStopped(item);
+    const base = remoteBase(item.remotePath);
+    try {
+      const listing = await files.list(remoteParent(item.remotePath));
+      const entry = listing.entries.find((each) => each.name === base && each.kind === "file");
+      if (!entry) throw new Error("no such file");
+      await download(item.remotePath, item.name, entry);
+    } catch (error) {
+      toast(
+        describeSftpFailure(String(error), displayName(item.remotePath), item.name).message,
+        "error",
+      );
+    }
+  };
+
+  // Resume continues from the committed bytes; a record whose segments were
+  // evicted since Files opened restarts cleanly from 0.
+  const resumeStopped = async (item: StoppedDownload) => {
+    const directory = await originDirectory();
+    const record = (await listRecords()).find((each) => each.id === item.id);
+    if (directory && record && (await recordIsUsable(directory, record))) {
+      await download(record.remotePath, item.name, record, record);
+    } else {
+      await retryStopped(item);
+    }
+  };
+
+  const runStopped = (action: (item: StoppedDownload) => Promise<void>) => {
+    if (!stopped) return;
+    const item = stopped;
+    void (async () => {
+      if (!navigator.locks) throw new Error("Download recovery requires browser locks.");
+      await navigator.locks.request(
+        `localssh-download-${item.id}`,
+        { ifAvailable: true },
+        async (lock) => {
+          if (!lock) throw new Error("This download is active in another tab.");
+          await action(item);
+        },
+      );
+    })().catch((error: unknown) => {
+      console.error(error);
+      toast(
+        describeSftpFailure(String(error), displayName(item.remotePath), item.name).message,
+        "error",
+      );
+    });
+  };
+
+  // X-05 still holds an unfinished download, so closing asks first, as during a transfer.
+  const unfinished = busy
+    ? { kind: busy.kind, name: busy.name }
+    : stopped?.state === "failed"
+      ? { kind: "download" as const, name: stopped.name }
+      : null;
+
+  const transferState =
+    busy?.kind !== "download" ? null : resuming ? (hidden ? "paused" : "resuming") : "downloading";
+  const bucket = busy ? Math.min(100, Math.floor(busy.percent / 25) * 25) : 0;
+  // The live region changes only on a state change or each 25 percent, so
+  // screen readers do not read every percent. Adjusted during render, from the
+  // previous state, so that coming back from resuming reads "Download resumed."
+  const announceKey = `${busy?.kind}|${busy?.name}|${transferState}|${bucket}`;
+  if (announced.key !== announceKey) {
+    const name = busy?.name;
+    const text = !busy
+      ? ""
+      : busy.kind === "upload"
+        ? `Uploading ${name}, ${bucket} percent.`
+        : transferState === "paused"
+          ? `Download of ${name} paused.`
+          : transferState === "resuming"
+            ? `Resuming ${name}.`
+            : announced.state === "paused" || announced.state === "resuming"
+              ? "Download resumed."
+              : `Downloading ${name}, ${bucket} percent.`;
+    setAnnounced({ key: announceKey, state: transferState, text });
+  }
 
   const atRoot = path === "/";
   const sortedEntries = useMemo(
@@ -471,7 +770,7 @@ export function FilePanel({
         event.preventDefault();
         setDragging(false);
         const file = event.dataTransfer.files[0];
-        if (file && !busy) void upload(file, false);
+        if (file && !locked) void upload(file, false);
       }}
       onKeyDown={(event) => {
         if (
@@ -495,19 +794,27 @@ export function FilePanel({
         </button>
         <button
           type="button"
-          onClick={() => (busy ? setConfirmClose(true) : onClose())}
+          onClick={() => (unfinished ? setConfirmClose(true) : onClose())}
           aria-label="Close files"
         >
           Close files
         </button>
       </header>
-      {confirmClose && busy && (
+      {confirmClose && unfinished && (
         <div className="file-panel__confirm" role="alertdialog" aria-label="Stop transfer">
           <p>
-            {busy.kind === "upload" ? "Uploading" : "Downloading"} {busy.name} is not finished.
-            Closing Files stops it. An unfinished upload does not change the remote file.
+            {unfinished.kind === "upload" ? "Uploading" : "Downloading"} {unfinished.name} is not
+            finished. Closing Files stops it. An unfinished upload does not change the remote file.
           </p>
-          <button type="button" onClick={onClose}>
+          <button
+            type="button"
+            onClick={() => {
+              // Stopping on purpose discards the partial bytes.
+              cancelled.current = true;
+              if (stopped?.state === "failed") runStopped(discardStopped);
+              onClose();
+            }}
+          >
             Stop and close
           </button>
           <button type="button" onClick={() => setConfirmClose(false)}>
@@ -521,7 +828,7 @@ export function FilePanel({
             <button
               key={crumb.path}
               type="button"
-              disabled={!!busy || loading}
+              disabled={locked || loading}
               onClick={() => void browse(crumb.path)}
               aria-current={index === breadcrumbs(path).length - 1 ? "page" : undefined}
             >
@@ -561,7 +868,7 @@ export function FilePanel({
         <button
           type="button"
           aria-label="Up to parent folder"
-          disabled={!files || loading || !!busy || atRoot}
+          disabled={!files || loading || locked || atRoot}
           onClick={() => void browse(remoteParent(path))}
         >
           <ArrowUp /> Up
@@ -569,7 +876,7 @@ export function FilePanel({
         <button
           type="button"
           aria-label="Refresh files"
-          disabled={!files || loading || !!busy}
+          disabled={!files || loading || locked}
           onClick={() => void browse(path)}
         >
           <RefreshCw /> Refresh
@@ -579,7 +886,7 @@ export function FilePanel({
           <input
             type="file"
             aria-label="Upload file"
-            disabled={!files || !!busy}
+            disabled={!files || locked}
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
@@ -605,7 +912,7 @@ export function FilePanel({
               value={pathInput}
               onChange={(event) => setPathInput(event.target.value)}
             />
-            <button type="submit" disabled={!files || loading || !!busy}>
+            <button type="submit" disabled={!files || loading || locked}>
               Open
             </button>
           </div>
@@ -631,8 +938,33 @@ export function FilePanel({
         </div>
       )}
       {busy && (
-        <p role="status">
-          {busy.kind === "upload" ? "Uploading" : "Downloading"} {busy.name}: {busy.percent}%{" "}
+        <div className="file-panel__transfer" data-state={transferState ?? "uploading"}>
+          {transferState === "paused" ? (
+            <>
+              <p>
+                Paused: {busy.name} at {busy.percent}%.
+              </p>
+              <p className="file-panel__transfer-hint">
+                Downloads pause while localssh is in the background.
+              </p>
+            </>
+          ) : transferState === "resuming" ? (
+            <p>
+              Resuming {busy.name} from {busy.percent}%...
+            </p>
+          ) : (
+            <>
+              <p>
+                {busy.kind === "upload" ? "Uploading" : "Downloading"} {busy.name}: {busy.percent}%
+              </p>
+              {busy.kind === "download" && touch && (
+                <p className="file-panel__transfer-hint">
+                  Keep localssh open until this finishes. If you switch apps, the download pauses
+                  and continues when you come back.
+                </p>
+              )}
+            </>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -642,8 +974,52 @@ export function FilePanel({
           >
             Cancel
           </button>
-        </p>
+        </div>
       )}
+      {stopped && !busy && (
+        <div className="file-panel__transfer" data-state={stopped.state} role="alert">
+          {stopped.state === "ended" ? (
+            <p>
+              {stopped.name} stopped at {stopped.percent}% when the connection closed.
+            </p>
+          ) : (
+            <>
+              <p>Could not resume {stopped.name}.</p>
+              <p className="file-panel__transfer-hint">
+                {stopped.state === "changed"
+                  ? "It changed on the server after the download started."
+                  : stopped.detail}
+              </p>
+            </>
+          )}
+          <div className="file-panel__transfer-actions">
+            <button type="button" onClick={() => runStopped(discardStopped)}>
+              {stopped.state === "ended" ? "Dismiss" : "Cancel"}
+            </button>
+            {stopped.state !== "failed" && (
+              <button
+                type="button"
+                disabled={!files || resuming}
+                onClick={() => runStopped(retryStopped)}
+              >
+                Retry
+              </button>
+            )}
+            {stopped.state !== "changed" && stopped.canResume && (
+              <button
+                type="button"
+                disabled={!files || resuming}
+                onClick={() => runStopped(resumeStopped)}
+              >
+                Resume download
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      <p className="visually-hidden" role="status" data-testid="transfer-announcement">
+        {announced.text}
+      </p>
       {loading && (
         <div className="file-panel__skeleton" role="status" aria-label="Loading files">
           <span>Loading files...</span>
@@ -759,11 +1135,15 @@ export function FilePanel({
                           className="file-panel__download"
                           type="button"
                           tabIndex={index === activeIndex ? 0 : -1}
-                          disabled={!!busy}
+                          disabled={locked}
                           aria-label={`Download file ${displayName(entry.name)}`}
                           onClick={(event) => {
                             event.stopPropagation();
-                            void download(entry);
+                            void download(
+                              remoteJoin(path, entry.name),
+                              displayName(entry.name),
+                              entry,
+                            );
                           }}
                         >
                           <Download aria-hidden="true" />

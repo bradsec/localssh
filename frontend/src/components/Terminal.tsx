@@ -5,8 +5,6 @@ import {
   classifyGesture,
   gestureToInput,
   isTap,
-  selectionSpan,
-  type TerminalCell,
   twoFingerScrollLines,
 } from "../terminalGestures.js";
 import {
@@ -16,6 +14,8 @@ import {
   type IOSDevice,
 } from "../terminalFont.js";
 import { resizeKeepingSelection } from "../terminalSelection.js";
+import { snapshotTerminalText } from "../terminalSnapshot.js";
+import { loadTerminalFont } from "../terminalFonts.js";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalControls {
@@ -29,6 +29,8 @@ export interface TerminalControls {
   applicationCursorMode: () => boolean;
   /** The text the user has selected in the terminal, empty when none. */
   getSelection: () => string;
+  /** Captures the active terminal buffer for a read-only text view. */
+  snapshotText: () => string;
   /** Inserts text as if pasted, honouring the terminal's bracketed-paste mode. */
   paste: (text: string) => void;
 }
@@ -41,10 +43,13 @@ export interface TerminalProps {
   onFocusChange?: (focused: boolean) => void;
   /** Reports whether the terminal currently holds a text selection. */
   onSelectionChange?: (hasSelection: boolean) => void;
+  onSelectText?: () => void;
   fontSize: number;
   fontFamily: string;
+  lineHeight: number;
   theme: ITheme;
   active: boolean;
+  phoneScreen: boolean;
 }
 
 export function Terminal({
@@ -53,21 +58,28 @@ export function Terminal({
   onResize,
   onFocusChange,
   onSelectionChange,
+  onSelectText,
   fontSize,
   fontFamily,
+  lineHeight,
   theme,
   active,
+  phoneScreen,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const previousFontSizeRef = useRef(fontSize);
+  const phoneScreenRef = useRef(phoneScreen);
+  phoneScreenRef.current = phoneScreen;
   // The terminal is built once, so the setup effect reads the current callback
   // through a ref rather than closing over the one it was mounted with.
   const onFocusChangeRef = useRef(onFocusChange);
   onFocusChangeRef.current = onFocusChange;
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
+  const onSelectTextRef = useRef(onSelectText);
+  onSelectTextRef.current = onSelectText;
 
   // xterm does not announce a selection restored after a resize, because its
   // change detection never saw the resize clear it, so the state is reported
@@ -75,6 +87,14 @@ export function Terminal({
   const fitKeepingSelection = (term: XTerm, fit: FitAddon) => {
     resizeKeepingSelection(term, () => fit.fit());
     onSelectionChangeRef.current?.(term.hasSelection());
+  };
+
+  const fitAndRefresh = () => {
+    const currentTerm = termRef.current;
+    const currentFit = fitRef.current;
+    if (!currentTerm || !currentFit) return;
+    fitKeepingSelection(currentTerm, currentFit);
+    currentTerm.refresh(0, currentTerm.rows - 1);
   };
 
   useEffect(() => {
@@ -89,7 +109,7 @@ export function Terminal({
       minimumContrastRatio: 4.5,
       screenReaderMode: true,
       scrollback: 5_000,
-      lineHeight: 1.15,
+      lineHeight,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -110,6 +130,7 @@ export function Terminal({
       blur: () => term.blur(),
       applicationCursorMode: () => isApplicationCursorMode(term),
       getSelection: () => term.getSelection(),
+      snapshotText: () => snapshotTerminalText(term.buffer.active),
       paste: (text) => term.paste(text),
     });
 
@@ -140,7 +161,9 @@ export function Terminal({
     const detachGestures = attachGestures(containerRef.current, {
       term,
       onInput,
+      isPhoneScreen: () => phoneScreenRef.current,
       smallScreenIOS: isSmallScreenIOS(currentIOSDevice()),
+      onSelectText: () => onSelectTextRef.current?.(),
     });
 
     return () => {
@@ -168,14 +191,6 @@ export function Terminal({
     previousFontSizeRef.current = fontSize;
     const device = currentIOSDevice();
 
-    const fitAndRefresh = () => {
-      const currentTerm = termRef.current;
-      const currentFit = fitRef.current;
-      if (!currentTerm || !currentFit) return;
-      fitKeepingSelection(currentTerm, currentFit);
-      currentTerm.refresh(0, currentTerm.rows - 1);
-    };
-
     let cancelRestore = () => {};
     let fitFrame = 0;
     if (sizeChanged && isSmallScreenIOS(device)) {
@@ -188,11 +203,37 @@ export function Terminal({
       fitFrame = requestAnimationFrame(fitAndRefresh);
     }
 
+    let cancelled = false;
+    const remeasureLoadedFont = () => {
+      if (cancelled) return;
+      if (isSmallScreenIOS(device)) {
+        cancelRestore();
+        cancelRestore = applyFontOptionsAcrossFrames(term, fontSize, fontFamily, fitAndRefresh);
+      } else {
+        applyFontOptions(term, fontSize, fontFamily);
+        fitAndRefresh();
+      }
+    };
+    void loadTerminalFont(fontFamily)
+      .then(() => document.fonts.load(`${fontSize}px ${fontFamily}`))
+      .then(remeasureLoadedFont)
+      .catch((error: unknown) => console.error("Terminal font failed to load", error));
+
     return () => {
+      cancelled = true;
       cancelRestore();
       cancelAnimationFrame(fitFrame);
     };
   }, [fontSize, fontFamily]);
+
+  useEffect(() => {
+    if (!termRef.current || termRef.current.options.lineHeight === lineHeight) return;
+    termRef.current.options.lineHeight = lineHeight;
+    const fitFrame = requestAnimationFrame(fitAndRefresh);
+    return () => cancelAnimationFrame(fitFrame);
+    // fitAndRefresh reads only refs, so it need not be a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineHeight]);
 
   useEffect(() => {
     if (!termRef.current) return;
@@ -222,15 +263,15 @@ export function Terminal({
 interface GestureTargets {
   term: XTerm;
   onInput: (data: string) => void;
+  isPhoneScreen: () => boolean;
   smallScreenIOS: boolean;
+  onSelectText: () => void;
 }
 
 /**
- * Recognises the touch gestures a phone or tablet needs to drive a shell:
- * swipe right for Tab, left for Esc, and flick up or down for shell history.
- * Pointer events cover touch and pen without claiming the mouse, and nothing
- * here calls preventDefault on a scroll, so xterm keeps its own touch scrolling
- * and text selection.
+ * Recognises tablet touch gestures for shell keys; phone drags only scroll.
+ * Pointer events cover touch and pen without claiming the mouse. A stationary
+ * long press opens the read-only text view instead of selecting xterm cells.
  *
  * A tap focuses the terminal from inside the pointerup handler. Safari opens the
  * on-screen keyboard only for a focus() made during a user gesture, and xterm's
@@ -238,6 +279,7 @@ interface GestureTargets {
  * gesture; focusing here makes a tap raise the keyboard on iOS.
  */
 function attachGestures(element: HTMLElement, targets: GestureTargets): () => void {
+  const isPhoneScreen = targets.isPhoneScreen;
   const active = new Map<number, { x: number; y: number }>();
   let start: {
     x: number;
@@ -254,48 +296,17 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   let oneFingerY: number | null = null;
   let oneFingerRemainder = 0;
   let longPressTimer = 0;
-  let selectionStart: TerminalCell | null = null;
 
   const cancelLongPress = () => {
     window.clearTimeout(longPressTimer);
     longPressTimer = 0;
   };
 
-  const cellAt = (clientX: number, clientY: number): TerminalCell | null => {
-    const screen = element.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen || screen.clientWidth <= 0 || screen.clientHeight <= 0) return null;
-    const bounds = screen.getBoundingClientRect();
-    const column = Math.max(
-      0,
-      Math.min(
-        targets.term.cols - 1,
-        Math.floor(((clientX - bounds.left) / bounds.width) * targets.term.cols),
-      ),
-    );
-    const viewportRow = Math.max(
-      0,
-      Math.min(
-        targets.term.rows - 1,
-        Math.floor(((clientY - bounds.top) / bounds.height) * targets.term.rows),
-      ),
-    );
-    return { column, row: targets.term.buffer.active.viewportY + viewportRow };
-  };
-
-  const updateSelection = (clientX: number, clientY: number) => {
-    if (!selectionStart) return;
-    const end = cellAt(clientX, clientY);
-    if (end) {
-      const span = selectionSpan(selectionStart, end, targets.term.cols);
-      targets.term.select(span.column, span.row, span.length);
-    }
-  };
-
   // Recognises the swipe from the movement so far rather than waiting for the
   // release. This lets a history flick win before the same movement becomes
   // manual scrollback below.
   const recogniseInFlight = (event: PointerEvent) => {
-    if (multiTouch || handled || !start || active.size !== 1) return;
+    if (isPhoneScreen() || multiTouch || handled || !start || active.size !== 1) return;
     const gesture = classifyGesture({
       dx: event.clientX - start.x,
       dy: event.clientY - start.y,
@@ -335,25 +346,19 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       };
       multiTouch = false;
       handled = false;
-      selectionStart = null;
       oneFingerY = event.clientY;
       oneFingerRemainder = 0;
       cancelLongPress();
-      const longPressX = event.clientX;
-      const longPressY = event.clientY;
       longPressTimer = window.setTimeout(() => {
-        selectionStart = cellAt(longPressX, longPressY);
-        if (!selectionStart) return;
         handled = true;
         targets.term.blur();
-        targets.term.select(selectionStart.column, selectionStart.row, 1);
+        targets.onSelectText();
       }, 500);
     } else {
       // A second finger explicitly drives scrollback, never shell input.
       start = null;
       multiTouch = true;
       cancelLongPress();
-      selectionStart = null;
       if (active.size === 2) {
         twoFingerY = activeCentroidY();
         twoFingerRemainder = 0;
@@ -365,12 +370,6 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     if (!active.has(event.pointerId)) return;
     active.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
-    if (selectionStart) {
-      updateSelection(event.clientX, event.clientY);
-      event.preventDefault();
-      return;
-    }
-
     if (start && !isTap({ dx: event.clientX - start.x, dy: event.clientY - start.y })) {
       cancelLongPress();
     }
@@ -379,6 +378,8 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       oneFingerRemainder += event.clientY - oneFingerY;
       oneFingerY = event.clientY;
       const canScrollNow =
+        (isPhoneScreen() &&
+          Math.abs(event.clientY - start.y) > Math.abs(event.clientX - start.x)) ||
         !isViewportAtBottom(targets.term) ||
         !start.verticalHistoryAllowed ||
         Math.abs(event.clientY - start.y) >= 44 ||
@@ -419,7 +420,6 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     // The browser took the touch over, so it completes nothing: no swipe, tap,
     // or selection change comes from where it happened to stop.
     if (event.type === "pointercancel") {
-      selectionStart = null;
       start = null;
       oneFingerY = null;
       oneFingerRemainder = 0;
@@ -431,16 +431,6 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
         multiTouch = false;
         handled = false;
       }
-      return;
-    }
-
-    if (selectionStart) {
-      updateSelection(event.clientX, event.clientY);
-      selectionStart = null;
-      start = null;
-      handled = false;
-      oneFingerY = null;
-      oneFingerRemainder = 0;
       return;
     }
 
@@ -473,7 +463,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     };
     start = null;
 
-    const gesture = classifyGesture(sample);
+    const gesture = isPhoneScreen() ? null : classifyGesture(sample);
     if (gesture) {
       targets.onInput(gestureToInput(gesture, isApplicationCursorMode(targets.term)));
       return;

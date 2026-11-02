@@ -100,6 +100,67 @@ describe("vaultEngine", () => {
     expect(sent.password).toBe("");
   });
 
+  it("omits absent terminal preferences and sends an explicit clear", async () => {
+    const input = { id: "a", nickname: "web", host: "h", port: 22, username: "u" };
+    await upsertEntry(input);
+    await upsertEntry({ ...input, terminal: null });
+
+    expect(JSON.parse(globals.vaultUpsert.mock.calls[0]![0] as string)).not.toHaveProperty(
+      "terminal",
+    );
+    expect(JSON.parse(globals.vaultUpsert.mock.calls[1]![0] as string)).toHaveProperty(
+      "terminal",
+      null,
+    );
+  });
+
+  it("sends terminal preferences and reads them from the redacted entry", async () => {
+    const terminal = {
+      fontFamily: "monospace",
+      fontSize: 16,
+      lineHeight: 1.35,
+      themeName: "Tokyo Night",
+    };
+    globals.vaultList.mockResolvedValue(JSON.stringify([{ ...entries[0], terminal }]));
+    const result = await upsertEntry({
+      id: "a",
+      nickname: "web",
+      host: "h",
+      port: 22,
+      username: "u",
+      terminal,
+    });
+
+    expect(JSON.parse(globals.vaultUpsert.mock.calls[0]![0] as string).terminal).toEqual(terminal);
+    expect(result.entries[0]!.terminal).toEqual(terminal);
+  });
+
+  it("rejects malformed terminal preferences from the engine boundary", async () => {
+    globals.vaultUnlock.mockResolvedValue(
+      JSON.stringify([{ ...entries[0], terminal: { fontSize: "large" } }]),
+    );
+    await expect(unlockVault("blob-1", "master")).rejects.toThrowError(/malformed entries/i);
+  });
+
+  it("rejects terminal values outside the page allowlists before upsert", async () => {
+    await expect(
+      upsertEntry({
+        id: "a",
+        nickname: "web",
+        host: "h",
+        port: 22,
+        username: "u",
+        terminal: {
+          fontFamily: "unknown",
+          fontSize: 16,
+          lineHeight: 1.15,
+          themeName: "Tokyo Night",
+        },
+      }),
+    ).rejects.toThrowError(/invalid terminal preferences/i);
+    expect(globals.vaultUpsert).not.toHaveBeenCalled();
+  });
+
   it("re-lists entries after an upsert", async () => {
     const result = await upsertEntry({
       id: "a",

@@ -1,6 +1,919 @@
-import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { spawn } from "node:child_process";
+import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+
+test("pagehide resumes the same terminal session and reload starts fresh", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  const host = address.slice(0, address.lastIndexOf(":"));
+  const port = address.slice(address.lastIndexOf(":") + 1);
+  await page.addInitScript(() => {
+    const Original = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    const received: unknown[][] = [];
+    Object.assign(window, { testSockets: sockets, testReceived: received });
+    window.WebSocket = class extends Original {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        sockets.push(this);
+        this.addEventListener("message", (event) => {
+          if (typeof event.data === "string") received.push(JSON.parse(event.data));
+        });
+      }
+    };
+  });
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(host);
+  await page.getByLabel(/^Port$/i).fill(port);
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Password$/i).fill("s3cret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  const terminal = page.getByRole("tabpanel", { name: `${host} terminal` });
+  await expect(page.getByRole("tab", { name: `${host}, connected` })).toBeVisible();
+  await terminal.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("before-background");
+  await page.keyboard.press("Enter");
+  await expect(terminal.locator(".xterm-rows")).toContainText("before-background");
+  const readyBefore = await page.evaluate(
+    () =>
+      (window as unknown as { testReceived: unknown[][] }).testReceived.filter(
+        (frame) => frame[1] === "ready",
+      ).length,
+  );
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("pagehide"));
+    const sockets = (window as unknown as { testSockets: WebSocket[] }).testSockets;
+    sockets.at(-1)?.close();
+    window.dispatchEvent(new Event("pageshow"));
+  });
+  await page.waitForFunction(() =>
+    (window as unknown as { testReceived: unknown[][] }).testReceived.some(
+      (frame) => frame[1] === "resumed",
+    ),
+  );
+  await expect(page.getByRole("tab", { name: `${host}, connected` })).toBeVisible();
+  await terminal.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("after-background");
+  await page.keyboard.press("Enter");
+  await expect(terminal.locator(".xterm-rows")).toContainText("after-background");
+  expect(
+    await page.evaluate(() => {
+      const frames = (window as unknown as { testReceived: unknown[][] }).testReceived;
+      return frames.filter((frame) => frame[1] === "ready").length;
+    }),
+  ).toBe(readyBefore);
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: /^Connect to server$/i })).toBeVisible();
+});
+
+test.describe("one-tap Reconnect on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("Reconnect after an expired session with a typed password shows the prefilled form", async ({
+    page,
+  }) => {
+    const address = process.env.E2E_SSHD_ADDR!;
+    const host = address.slice(0, address.lastIndexOf(":"));
+    const port = address.slice(address.lastIndexOf(":") + 1);
+    // A relay capped at 1 s grants 1 s of keep-alive, so the session expires for
+    // real while the page is away. Page sockets are pointed at it.
+    const relayPort = await new Promise<number>((resolve, reject) => {
+      const server = createServer();
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        const bound = server.address();
+        server.close(() => resolve(typeof bound === "object" && bound ? bound.port : 0));
+      });
+    });
+    const relay = spawn("npm", ["run", "relay:local", "--", String(relayPort)], {
+      cwd: path.resolve("../relay"),
+      env: { ...process.env, KEEPALIVE_MAX_SECONDS: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+      // Its own process group, so the relay npm starts is stopped with it.
+      detached: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      relay.stdout.on("data", (data: Buffer) => {
+        if (data.toString().includes(`local relay listening on ${relayPort}`)) resolve();
+      });
+      relay.once("exit", (code) => reject(new Error(`short-grace relay exited: ${code}`)));
+    });
+    try {
+      await page.addInitScript((target) => {
+        const Original = window.WebSocket;
+        const sockets: WebSocket[] = [];
+        Object.assign(window, { testSockets: sockets });
+        window.WebSocket = class extends Original {
+          constructor(url: string | URL, protocols?: string | string[]) {
+            super(String(url).replace(/127\.0\.0\.1:\d+/, target), protocols);
+            sockets.push(this);
+          }
+        };
+      }, `127.0.0.1:${relayPort}`);
+      await page.goto("/");
+      await page.getByLabel(/^Host$/i).fill(host);
+      await page.getByLabel(/^Port$/i).fill(port);
+      await page.getByLabel(/^Username$/i).fill("tester");
+      await page.getByLabel(/^Password$/i).fill("s3cret");
+      await page.getByRole("button", { name: /^Connect to server$/i }).tap();
+      await page.getByRole("button", { name: /trust and connect/i }).tap();
+      await expect(page.getByRole("toolbar", { name: "Terminal keys" })).toBeVisible();
+      await page.locator(".xterm-screen").tap();
+      await page.keyboard.type("before-expiry");
+      await expect(page.locator(".xterm-rows")).toContainText("before-expiry", { timeout: 5_000 });
+
+      await page.evaluate(async () => {
+        window.dispatchEvent(new Event("pagehide"));
+        (window as unknown as { testSockets: WebSocket[] }).testSockets.at(-1)?.close();
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        window.dispatchEvent(new Event("pageshow"));
+      });
+      await expect(page.getByText("Session expired.").first()).toBeVisible();
+      await page.getByRole("button", { name: "Reconnect" }).tap();
+
+      await expect(page.getByLabel(/^Host$/i)).toHaveValue(host);
+      await expect(page.getByLabel(/^Port$/i)).toHaveValue(port);
+      await expect(page.getByLabel(/^Username$/i)).toHaveValue("tester");
+      await expect(page.getByLabel(/^Password$/i)).toHaveValue("");
+      await expect(page.getByLabel(/^Password$/i)).toBeFocused();
+
+      await page.getByLabel(/^Password$/i).fill("s3cret");
+      await page.getByRole("button", { name: /^Connect to server$/i }).tap();
+      await expect(page.getByRole("toolbar", { name: "Terminal keys" })).toBeVisible();
+      const rows = page.locator(".xterm-rows");
+      await expect(rows).toContainText("before-expiry");
+      await expect(rows).toContainText("[localssh] New connection.");
+      await page.getByRole("button", { name: "Open terminals" }).tap();
+      await expect(page.getByRole("tab")).toHaveCount(1);
+    } finally {
+      // SIGKILL: the relay's SIGTERM shutdown waits for live sessions to end.
+      process.kill(-relay.pid!, "SIGKILL");
+    }
+  });
+});
+
+test("resumes one WASM SSH session with each echoed byte exactly once", async ({ page }) => {
+  test.setTimeout(90_000);
+  const address = process.env.E2E_SSHD_ADDR!;
+  const separator = address.lastIndexOf(":");
+  const port = await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+    });
+  });
+  const relay = spawn("npm", ["run", "relay:local", "--", String(port)], {
+    cwd: path.resolve("../relay"),
+    env: { ...process.env, KEEPALIVE_MAX_SECONDS: "3600" },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      relay.stdout.on("data", (data: Buffer) => {
+        if (data.toString().includes(`local relay listening on ${port}`)) resolve();
+      });
+      relay.once("exit", (code) => reject(new Error(`v2 relay exited: ${code}`)));
+    });
+    await page.addInitScript(() => {
+      const Original = window.WebSocket;
+      const sockets: WebSocket[] = [];
+      const sent: unknown[] = [];
+      const sendTimes: number[] = [];
+      const received: unknown[] = [];
+      (window as unknown as { testSockets: WebSocket[] }).testSockets = sockets;
+      Object.assign(window, { testSent: sent, testReceived: received, testSendTimes: sendTimes });
+      window.WebSocket = class extends Original {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          sockets.push(this);
+          this.addEventListener("message", (event) => {
+            if (typeof event.data === "string") received.push(JSON.parse(event.data));
+          });
+        }
+        override send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+          if (typeof data === "string") {
+            const frame = JSON.parse(data);
+            sent.push(frame);
+            sendTimes.push(performance.now());
+            if (
+              frame[1] === "resume" &&
+              (window as unknown as { testDropResumes?: boolean }).testDropResumes
+            ) {
+              this.close();
+              return;
+            }
+          }
+          super.send(data);
+        }
+      };
+    });
+    await page.goto("/");
+    await page.getByLabel(/^Host$/i).fill(address.slice(0, separator));
+    await page.getByLabel(/^Port$/i).fill(address.slice(separator + 1));
+    await page.getByLabel(/^Username$/i).fill("tester");
+    await page.getByLabel(/^Password$/i).fill("s3cret");
+    await page.getByRole("button", { name: /^Connect to server$/i }).click();
+    await page.getByRole("button", { name: /trust and connect/i }).click();
+    await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+    const existingConnects = await page.evaluate(
+      () =>
+        (window as unknown as { testSent: unknown[][] }).testSent.filter(
+          (frame) => frame[1] === "connect",
+        ).length,
+    );
+
+    await page.evaluate(
+      async ({ host, port, relayPort }) => {
+        const output: string[][] = [[], []];
+        const closes: string[] = [];
+        const statuses: string[][] = [[], []];
+        const grants: Array<
+          { grantedGraceMs: number | null; capGraceMs: number | null } | undefined
+        > = [];
+        const handles = [];
+        for (let index = 0; index < 2; index++) {
+          handles.push(
+            await window.sshConnect(`ws://127.0.0.1:${relayPort}`, host, port, "tester", "s3cret", {
+              onHostKey: () => true,
+              onData: (chunk) => output[index].push(new TextDecoder().decode(chunk)),
+              onClose: (reason) => {
+                closes[index] = reason ?? "";
+              },
+              onTransportStatus: (status, info) => {
+                statuses[index].push(status);
+                if (status === "connected") grants[index] = info;
+              },
+              keepAliveMs: index === 0 ? 120_000 : null,
+            }),
+          );
+        }
+        Object.assign(window, {
+          testSessions: handles,
+          testOutput: output,
+          testCloses: closes,
+          testStatuses: statuses,
+          testGrants: grants,
+        });
+      },
+      { host: address.slice(0, separator), port: address.slice(separator + 1), relayPort: port },
+    );
+    expect(
+      await page.evaluate(() => (window as unknown as { testGrants: unknown[] }).testGrants),
+    ).toEqual([
+      { grantedGraceMs: 120_000, capGraceMs: 3_600_000 },
+      { grantedGraceMs: 3_600_000, capGraceMs: 3_600_000 },
+    ]);
+    expect(
+      await page.evaluate(
+        (count) =>
+          (window as unknown as { testSent: unknown[][] }).testSent
+            .filter((frame) => frame[1] === "connect")
+            .slice(count)
+            .map((frame) => frame[4]),
+        existingConnects,
+      ),
+    ).toEqual([120_000, null]);
+    const marker = `resume-${crypto.randomUUID()}`;
+    const otherMarker = `other-${crypto.randomUUID()}`;
+    await page.evaluate(
+      ({ text, relayPort }) => {
+        const state = window as unknown as {
+          testSessions: Array<{ write(data: Uint8Array): string | null }>;
+          testSockets: WebSocket[];
+        };
+        state.testSessions[0].write(new TextEncoder().encode(text));
+        state.testSockets.filter((socket) => socket.url.includes(`:${relayPort}`))[0].close();
+      },
+      { text: marker, relayPort: port },
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { testStatuses: string[][] }).testStatuses[0]),
+      )
+      .toContain("reconnecting");
+    await page.evaluate(() => {
+      const state = window as unknown as {
+        testSessions: Array<{ write(data: Uint8Array): string | null }>;
+      };
+      state.testSessions[0].write(new TextEncoder().encode("-detached"));
+    });
+    await page.evaluate((text) => {
+      const state = window as unknown as {
+        testSessions: Array<{ write(data: Uint8Array): string | null }>;
+      };
+      state.testSessions[1].write(new TextEncoder().encode(text));
+    }, otherMarker);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as unknown as { testOutput: string[][] }).testOutput[0].join(""),
+        ),
+      )
+      .toContain(`${marker}-detached`);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as unknown as { testOutput: string[][] }).testOutput[1].join(""),
+        ),
+      )
+      .toContain(otherMarker);
+    const output = await page.evaluate(() =>
+      (window as unknown as { testOutput: string[][] }).testOutput[0].join(""),
+    );
+    expect(output.split(marker).length - 1).toBe(1);
+    expect(output).not.toContain(otherMarker);
+    const otherOutput = await page.evaluate(() =>
+      (window as unknown as { testOutput: string[][] }).testOutput[1].join(""),
+    );
+    expect(otherOutput).not.toContain(marker);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (window as unknown as { testSent: unknown[][] }).testSent.some(
+              (frame) => frame[1] === "ping",
+            ),
+          ),
+        { timeout: 25_000 },
+      )
+      .toBe(true);
+    const burstError = await page.evaluate(() => {
+      const state = window as unknown as {
+        testSessions: Array<{ write(data: Uint8Array): string | null }>;
+      };
+      return state.testSessions[1].write(new Uint8Array(1_048_576).fill(120));
+    });
+    expect(burstError).toBeNull();
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () => (window as unknown as { testOutput: string[][] }).testOutput[1].join("").length,
+          ),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(1_048_576);
+    const frameCounts = await page.evaluate(() => {
+      const state = window as unknown as { testReceived: unknown[][]; testSent: unknown[][] };
+      return {
+        data: state.testReceived.filter((frame) => frame[1] === "data").length,
+        ack: state.testSent.filter((frame) => frame[1] === "ack" && frame[2] === "server").length,
+      };
+    });
+    expect(frameCounts.ack).toBeLessThan(frameCounts.data / 2);
+    await page.evaluate(() => {
+      const state = window as unknown as { testSessions: Array<{ detach?(): void }> };
+      state.testSessions[0].detach?.();
+    });
+    await expect
+      .poll(() =>
+        page.evaluate((relayPort) => {
+          const state = window as unknown as { testSockets: WebSocket[] };
+          return state.testSockets.filter((socket) => socket.url.includes(`:${relayPort}`)).at(-1)
+            ?.readyState;
+        }, port),
+      )
+      .toBe(3);
+    await page.evaluate(() => {
+      const state = window as unknown as {
+        testSessions: Array<{ resume?(): void; write(data: Uint8Array): string | null }>;
+      };
+      state.testSessions[0].write(new TextEncoder().encode("manual-detach"));
+      state.testSessions[0].resume?.();
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as unknown as { testOutput: string[][] }).testOutput[0].join(""),
+        ),
+      )
+      .toContain("manual-detach");
+    await page.evaluate(() => {
+      const state = window as unknown as { testSessions: Array<{ close(): void }> };
+      state.testSessions[0].close();
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const state = window as unknown as { testSent: unknown[][] };
+          return state.testSent.some((frame) => frame[1] === "close");
+        }),
+      )
+      .toBe(true);
+    const resumeAfterClose = await page.evaluate(async (relayPort) => {
+      const state = window as unknown as { testReceived: unknown[][] };
+      const ready = state.testReceived.find((frame) => frame[1] === "ready")!;
+      const resumed = state.testReceived.filter((frame) => frame[1] === "resumed").at(-1)!;
+      return await new Promise<string>((resolve, reject) => {
+        const socket = new WebSocket(`ws://127.0.0.1:${relayPort}`);
+        socket.addEventListener("open", () =>
+          socket.send(JSON.stringify([2, "resume", ready[2], resumed[4], 0, 0])),
+        );
+        socket.addEventListener("message", (event) => {
+          const frame = JSON.parse(event.data as string) as unknown[];
+          if (frame[1] === "error") resolve(String(frame[2]));
+        });
+        socket.addEventListener("error", reject);
+      });
+    }, port);
+    expect(resumeAfterClose).toBe("expired");
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { testCloses: string[] }).testCloses[0]),
+      )
+      .toBe("");
+    await page.evaluate(() => {
+      const state = window as unknown as {
+        testSessions: Array<{ write(data: Uint8Array): string | null }>;
+      };
+      state.testSessions[1].write(new TextEncoder().encode("still-open"));
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as unknown as { testOutput: string[][] }).testOutput[1].join(""),
+        ),
+      )
+      .toContain("still-open");
+    await page.evaluate((relayPort) => {
+      const state = window as unknown as { testSockets: WebSocket[] };
+      state.testSockets
+        .filter((socket) => socket.url.includes(`:${relayPort}`))[1]
+        .dispatchEvent(
+          new MessageEvent("message", { data: JSON.stringify([2, "error", "offset_mismatch"]) }),
+        );
+    }, port);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as unknown as { testStatuses: string[][] }).testStatuses[1].at(-1),
+        ),
+      )
+      .toBe("expired");
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { testCloses: string[] }).testCloses[1]),
+      )
+      .toContain("offset_mismatch");
+    const takeover = await page.evaluate(
+      async ({ relayPort, host, sshPort }) => {
+        const url = `ws://127.0.0.1:${relayPort}`;
+        const first = new WebSocket(url);
+        const ready = await new Promise<unknown[]>((resolve) => {
+          first.addEventListener("open", () =>
+            first.send(JSON.stringify([2, "connect", host, Number(sshPort), 120_000])),
+          );
+          first.addEventListener(
+            "message",
+            (event) => resolve(JSON.parse(event.data as string) as unknown[]),
+            { once: true },
+          );
+        });
+        const superseded = new Promise<unknown[]>((resolve) => {
+          first.addEventListener("message", (event) => {
+            const frame = JSON.parse(event.data as string) as unknown[];
+            if (frame[1] === "error") resolve(frame);
+          });
+        });
+        const second = new WebSocket(url);
+        const resumed = await new Promise<unknown[]>((resolve) => {
+          second.addEventListener("open", () =>
+            second.send(JSON.stringify([2, "resume", ready[2], ready[3], 0, 0])),
+          );
+          second.addEventListener(
+            "message",
+            (event) => resolve(JSON.parse(event.data as string) as unknown[]),
+            { once: true },
+          );
+        });
+        const oldResult = await superseded;
+        second.send(JSON.stringify([2, "close"]));
+        return { oldResult, resumed, oldToken: ready[3] };
+      },
+      { relayPort: port, host: address.slice(0, separator), sshPort: address.slice(separator + 1) },
+    );
+    expect(takeover.oldResult).toEqual([2, "error", "superseded"]);
+    expect(takeover.resumed.slice(0, 4)).toEqual([2, "resumed", 0, 0]);
+    expect(takeover.resumed[4]).not.toBe(takeover.oldToken);
+    const detachedClose = await page.evaluate(
+      async ({ relayPort, host, sshPort }) => {
+        let closed = false;
+        const handle = await window.sshConnect(
+          `ws://127.0.0.1:${relayPort}`,
+          host,
+          sshPort,
+          "tester",
+          "s3cret",
+          {
+            onHostKey: () => true,
+            onData: () => {},
+            onClose: () => {
+              closed = true;
+            },
+            keepAliveMs: 120_000,
+          },
+        );
+        const state = window as unknown as {
+          testReceived: unknown[][];
+          testSent: unknown[][];
+          testSockets: WebSocket[];
+        };
+        const ready = state.testReceived.filter((frame) => frame[1] === "ready").at(-1)!;
+        const serverAck = state.testSent
+          .filter((frame) => frame[1] === "ack" && frame[2] === "server")
+          .at(-1)![3];
+        handle.detach?.();
+        await new Promise<void>((resolve) =>
+          state.testSockets.at(-1)!.addEventListener("close", () => resolve(), { once: true }),
+        );
+        handle.close();
+        await new Promise<void>((resolve) => {
+          const check = () => (closed ? resolve() : setTimeout(check, 10));
+          check();
+        });
+        return await new Promise<string>((resolve, reject) => {
+          const socket = new WebSocket(`ws://127.0.0.1:${relayPort}`);
+          socket.addEventListener("open", () =>
+            socket.send(JSON.stringify([2, "resume", ready[2], ready[3], 0, serverAck])),
+          );
+          socket.addEventListener("message", (event) => {
+            const frame = JSON.parse(event.data as string) as unknown[];
+            if (frame[1] === "error") resolve(String(frame[2]));
+            if (frame[1] === "resumed")
+              reject(new Error("detached session remained resumable after close"));
+          });
+        });
+      },
+      { relayPort: port, host: address.slice(0, separator), sshPort: address.slice(separator + 1) },
+    );
+    expect(detachedClose).toBe("expired");
+    const takeoverStatus = await page.evaluate(
+      async ({ relayPort, host, sshPort }) => {
+        const statuses: string[] = [];
+        const closes: string[] = [];
+        const handle = await window.sshConnect(
+          `ws://127.0.0.1:${relayPort}`,
+          host,
+          sshPort,
+          "tester",
+          "s3cret",
+          {
+            onHostKey: () => true,
+            onData: () => {},
+            onClose: (reason) => closes.push(reason ?? ""),
+            onTransportStatus: (status) => statuses.push(status),
+            keepAliveMs: 120_000,
+          },
+        );
+        const state = window as unknown as {
+          testReceived: unknown[][];
+          testSent: unknown[][];
+          testSockets: WebSocket[];
+        };
+        const ready = state.testReceived.filter((frame) => frame[1] === "ready").at(-1)!;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const clientAck = state.testReceived
+          .filter((frame) => frame[1] === "ack" && frame[2] === "client")
+          .at(-1)![3];
+        const serverAck = state.testSent
+          .filter((frame) => frame[1] === "ack" && frame[2] === "server")
+          .at(-1)![3];
+        const socket = new WebSocket(`ws://127.0.0.1:${relayPort}`);
+        const resumed = await new Promise<unknown[]>((resolve) => {
+          socket.addEventListener("open", () =>
+            socket.send(JSON.stringify([2, "resume", ready[2], ready[3], clientAck, serverAck])),
+          );
+          socket.addEventListener(
+            "message",
+            (event) => resolve(JSON.parse(event.data as string) as unknown[]),
+            { once: true },
+          );
+        });
+        await new Promise<void>((resolve) => {
+          const check = () => (statuses.includes("expired") ? resolve() : setTimeout(check, 10));
+          check();
+        });
+        const resumeCount = state.testSent.filter((frame) => frame[1] === "resume").length;
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        const retried =
+          state.testSent.filter((frame) => frame[1] === "resume").length !== resumeCount;
+        socket.send(JSON.stringify([2, "close"]));
+        handle.close();
+        return { statuses, closes, resumed, retried };
+      },
+      { relayPort: port, host: address.slice(0, separator), sshPort: address.slice(separator + 1) },
+    );
+    expect(takeoverStatus.resumed[1]).toBe("resumed");
+    expect(takeoverStatus.statuses).toContain("expired");
+    expect(takeoverStatus.closes.join(" ")).toContain("superseded");
+    expect(takeoverStatus.retried).toBe(false);
+
+    const priorResumes = await page.evaluate(
+      () =>
+        (window as unknown as { testSent: unknown[][] }).testSent.filter(
+          (frame) => frame[1] === "resume",
+        ).length,
+    );
+    await page.evaluate(
+      async ({ relayPort, host, sshPort }) => {
+        const handle = await window.sshConnect(
+          `ws://127.0.0.1:${relayPort}`,
+          host,
+          sshPort,
+          "tester",
+          "s3cret",
+          {
+            onHostKey: () => true,
+            onData: () => {},
+            onClose: () => {},
+            keepAliveMs: 120_000,
+          },
+        );
+        const state = window as unknown as {
+          testDropResumes: boolean;
+          testSockets: WebSocket[];
+          testRetryHandle: typeof handle;
+        };
+        state.testDropResumes = true;
+        state.testRetryHandle = handle;
+        state.testSockets
+          .filter((socket) => socket.url.includes(`:${relayPort}`))
+          .at(-1)!
+          .close();
+      },
+      { relayPort: port, host: address.slice(0, separator), sshPort: address.slice(separator + 1) },
+    );
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const state = window as unknown as { testSent: unknown[][] };
+            return state.testSent.filter((frame) => frame[1] === "resume").length;
+          }),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThanOrEqual(priorResumes + 4);
+    const retryIntervals = await page.evaluate(() => {
+      const state = window as unknown as {
+        testSent: unknown[][];
+        testSendTimes: number[];
+        testDropResumes: boolean;
+        testRetryHandle: { resume(): void };
+      };
+      const times = state.testSendTimes.filter(
+        (_, index) => (state.testSent[index] as unknown[])[1] === "resume",
+      );
+      state.testDropResumes = false;
+      state.testRetryHandle.resume();
+      return times
+        .slice(-4)
+        .slice(1)
+        .map((time, index) => time - times.at(-4 + index)!);
+    });
+    expect(retryIntervals[1]).toBeGreaterThan(retryIntervals[0] * 1.5);
+    expect(retryIntervals[2]).toBeGreaterThan(retryIntervals[1] * 1.5);
+
+    const lateResume = await page.evaluate(
+      async ({ relayPort, host, sshPort }) => {
+        const handle = await window.sshConnect(
+          `ws://127.0.0.1:${relayPort}`,
+          host,
+          sshPort,
+          "tester",
+          "s3cret",
+          {
+            onHostKey: () => true,
+            onData: () => {},
+            onClose: () => {},
+            keepAliveMs: 100,
+          },
+        );
+        const state = window as unknown as { testSent: unknown[][] };
+        handle.detach?.();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const before = state.testSent.filter((frame) => frame[1] === "resume").length;
+        handle.resume?.();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return state.testSent.filter((frame) => frame[1] === "resume").length - before;
+      },
+      { relayPort: port, host: address.slice(0, separator), sshPort: address.slice(separator + 1) },
+    );
+    expect(lateResume).toBeGreaterThanOrEqual(1);
+  } finally {
+    process.kill(-relay.pid!, "SIGKILL");
+  }
+});
+
+test("v2 resumes in-flight 8 MiB SFTP transfers after socket loss", async ({ page }) => {
+  test.setTimeout(120_000);
+  const address = process.env.E2E_SSHD_ADDR!;
+  const separator = address.lastIndexOf(":");
+  const root = process.env.E2E_SFTP_ROOT!;
+  const source = Buffer.allocUnsafe(8 << 20);
+  for (let index = 0; index < source.length; index++) source[index] = index % 251;
+  writeFileSync(path.join(root, "resume-download.bin"), source);
+  const expectedHash = createHash("sha256").update(source).digest("hex");
+  const port = await new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+    });
+  });
+  const relay = spawn("npm", ["run", "relay:local", "--", String(port)], {
+    cwd: path.resolve("../relay"),
+    env: { ...process.env, KEEPALIVE_MAX_SECONDS: "3600" },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      relay.stdout.on("data", (data: Buffer) => {
+        if (data.toString().includes(`local relay listening on ${port}`)) resolve();
+      });
+      relay.once("exit", (code) => reject(new Error(`v2 relay exited: ${code}`)));
+    });
+    await page.addInitScript(() => {
+      const Original = window.WebSocket;
+      const sockets: WebSocket[] = [];
+      Object.assign(window, { transferSockets: sockets });
+      window.WebSocket = class extends Original {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          sockets.push(this);
+        }
+      };
+    });
+    await page.goto("/");
+    await page.getByLabel(/^Host$/i).fill(address.slice(0, separator));
+    await page.getByLabel(/^Port$/i).fill(address.slice(separator + 1));
+    await page.getByLabel(/^Username$/i).fill("tester");
+    await page.getByLabel(/^Password$/i).fill("s3cret");
+    await page.getByRole("button", { name: /^Connect to server$/i }).click();
+    await page.getByRole("button", { name: /trust and connect/i }).click();
+    await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+
+    const result = await page.evaluate(
+      async ({ host, sshPort, relayPort }) => {
+        const statuses: string[] = [];
+        const closes: string[] = [];
+        const sockets = (window as unknown as { transferSockets: WebSocket[] }).transferSockets;
+        const handle = await window.sshConnect(
+          `ws://127.0.0.1:${relayPort}`,
+          host,
+          sshPort,
+          "tester",
+          "s3cret",
+          {
+            onHostKey: () => true,
+            onData: () => {},
+            onClose: (reason) => closes.push(reason ?? ""),
+            onTransportStatus: (status) => statuses.push(status),
+            keepAliveMs: 120_000,
+          },
+        );
+        const files = await handle.openFiles!();
+        const downloadProgress: number[] = [];
+        const chunks: Uint8Array[] = [];
+        let downloadDropped = false;
+        await files.download(
+          "/resume-download.bin",
+          async (chunk) => {
+            chunks.push(chunk.slice());
+          },
+          (percent) => {
+            downloadProgress.push(percent);
+            if (!downloadDropped && percent >= 10 && percent < 100) {
+              downloadDropped = true;
+              sockets.at(-1)!.close();
+            }
+          },
+        );
+        const downloaded = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+        let offset = 0;
+        for (const chunk of chunks) {
+          downloaded.set(chunk, offset);
+          offset += chunk.length;
+        }
+        const downloadHash = Array.from(
+          new Uint8Array(await crypto.subtle.digest("SHA-256", downloaded)),
+        )
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+
+        const uploadBytes = new Uint8Array(8 << 20);
+        for (let index = 0; index < uploadBytes.length; index++) uploadBytes[index] = index % 251;
+        const uploadProgress: number[] = [];
+        let uploadDropped = false;
+        await files.upload(
+          "/resume-upload.bin",
+          new File([uploadBytes], "resume-upload.bin"),
+          false,
+          (percent) => {
+            uploadProgress.push(percent);
+            if (!uploadDropped && percent >= 10 && percent < 100) {
+              uploadDropped = true;
+              sockets.at(-1)!.close();
+            }
+          },
+        );
+        const unexpectedCloses = closes.slice();
+        files.close();
+        handle.close();
+        return {
+          downloadHash,
+          downloadProgress,
+          uploadProgress,
+          downloadDropped,
+          uploadDropped,
+          statuses,
+          closes: unexpectedCloses,
+        };
+      },
+      { host: address.slice(0, separator), sshPort: address.slice(separator + 1), relayPort: port },
+    );
+    expect(result.downloadDropped).toBe(true);
+    expect(result.uploadDropped).toBe(true);
+    expect(result.statuses.filter((status) => status === "reconnecting")).toHaveLength(2);
+    expect(result.statuses.filter((status) => status === "connected")).toHaveLength(3);
+    expect(result.closes).toEqual([]);
+    expect(result.downloadProgress.at(-1)).toBe(100);
+    expect(result.uploadProgress.at(-1)).toBe(100);
+    expect(
+      result.downloadProgress.every(
+        (value, index, list) => index === 0 || value >= list[index - 1],
+      ),
+    ).toBe(true);
+    expect(
+      result.uploadProgress.every((value, index, list) => index === 0 || value >= list[index - 1]),
+    ).toBe(true);
+    expect(result.downloadHash).toBe(expectedHash);
+    expect(
+      createHash("sha256")
+        .update(readFileSync(path.join(root, "resume-upload.bin")))
+        .digest("hex"),
+    ).toBe(expectedHash);
+  } finally {
+    process.kill(-relay.pid!, "SIGKILL");
+    rmSync(path.join(root, "resume-download.bin"), { force: true });
+    rmSync(path.join(root, "resume-upload.bin"), { force: true });
+  }
+});
+
+test("a keepAliveMs-absent connect uses v1 frames", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  await page.addInitScript(() => {
+    localStorage.setItem("terminalSettings", JSON.stringify({ keepAlive: "off" }));
+    const send = WebSocket.prototype.send;
+    const frames: string[] = [];
+    Object.assign(window, { testFrames: frames });
+    WebSocket.prototype.send = function (data) {
+      frames.push(typeof data === "string" ? data : "binary");
+      return send.call(this, data);
+    };
+  });
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+  await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Password$/i).fill("s3cret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).click();
+  await page.getByRole("button", { name: /trust and connect/i }).click();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  const frames = await page.evaluate(
+    () => (window as unknown as { testFrames: string[] }).testFrames,
+  );
+  const connects = frames.filter((frame) => frame !== "binary");
+  expect(connects.length).toBeGreaterThan(0);
+  expect(
+    connects.every((frame) => {
+      const parsed = JSON.parse(frame) as Record<string, unknown>;
+      return (
+        parsed.host === address.slice(0, address.lastIndexOf(":")) &&
+        parsed.port === Number(address.slice(address.lastIndexOf(":") + 1)) &&
+        Object.keys(parsed).length === 2
+      );
+    }),
+  ).toBe(true);
+  expect(frames).toContain("binary");
+});
 
 for (const viewport of [
   { width: 320, height: 700 },
@@ -251,7 +1164,11 @@ test("filters and keyboard-scrolls a 2,000-file folder inside the panel", async 
   expect(await pageScroll()).toBe(0);
 });
 
-test("lists the first 10,000 items of a larger folder and reaches the end", async ({ page }) => {
+test("lists the first 10,000 items of a larger folder and reaches the end", async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "CDP is Chromium only");
   test.setTimeout(60_000);
   const session = await page.context().newCDPSession(page);
   await session.send("Emulation.setCPUThrottlingRate", { rate: 4 });
@@ -309,13 +1226,19 @@ test("keeps two live terminal sessions and closes only the selected one", async 
     "true",
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  const tabSize = await page
+  const switcherButton = page.getByRole("button", { name: "Open terminals" });
+  await expect(switcherButton).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "Open terminals" })).toHaveCount(0);
+  await switcherButton.click();
+  const switcher = page.getByRole("tablist", { name: "Open terminals" });
+  await expect(switcher.getByRole("tab", { name: `${host}, connected` })).toHaveCount(2);
+  const tabSize = await switcher
     .getByRole("tab", { name: `${host}, connected` })
     .first()
     .boundingBox();
   expect(tabSize!.height).toBeGreaterThanOrEqual(44);
 
-  await page
+  await switcher
     .getByRole("button", { name: `Close ${host} terminal` })
     .last()
     .click();
@@ -384,7 +1307,7 @@ for (const width of [320, 390]) {
     const page = await browser.newPage({ viewport: { width, height: 700 } });
     await page.goto("/");
     for (const [name, panel] of [
-      ["Appearance", ".terminal-settings fieldset"],
+      ["Settings", ".settings-dialog"],
       ["About", ".about__panel"],
     ] as const) {
       await page.getByRole("button", { name, exact: true }).click();
@@ -396,3 +1319,231 @@ for (const width of [320, 390]) {
     await page.close();
   });
 }
+
+// Download resume (T13d). OPFS writes are slowed in the page so a download can
+// be stopped after its first 4 MiB segment is committed and before it ends.
+test.describe("download resume after expiry or eviction", () => {
+  const name = "resume.bin";
+  const size = 8 << 20;
+  const source = Buffer.allocUnsafe(size);
+  for (let index = 0; index < size; index++) source[index] = (index * 7 + (index >> 13)) % 251;
+  const sourceHash = createHash("sha256").update(source).digest("hex");
+  const remoteFile = () => path.join(process.env.E2E_SFTP_ROOT!, name);
+
+  test.beforeEach(() => writeFileSync(remoteFile(), source));
+  test.afterEach(() => rmSync(remoteFile(), { force: true }));
+
+  /** Counts bytes written to OPFS and delays each write in proportion to its size. */
+  async function slowOpfsWrites(page: Page) {
+    await page.addInitScript(() => {
+      const state = { bytes: 0, msPer32KiB: 15 };
+      Object.assign(window, { testWrites: state });
+      const proto = FileSystemWritableFileStream.prototype;
+      const original = proto.write;
+      proto.write = async function (data: FileSystemWriteChunkType) {
+        const length =
+          data instanceof Blob ? data.size : ArrayBuffer.isView(data) ? data.byteLength : 0;
+        state.bytes += length;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.ceil(length / 32768) * state.msPer32KiB),
+        );
+        return original.call(this, data);
+      };
+    });
+  }
+
+  function writtenBytes(page: Page) {
+    return page.evaluate(
+      () => (window as unknown as { testWrites: { bytes: number } }).testWrites.bytes,
+    );
+  }
+
+  function resetWrittenBytes(page: Page) {
+    return page.evaluate(() => {
+      (window as unknown as { testWrites: { bytes: number } }).testWrites.bytes = 0;
+    });
+  }
+
+  /** Fills the connect form; the host key prompt appears only on the first visit. */
+  async function login(page: Page, tap: boolean, firstVisit = true) {
+    const address = process.env.E2E_SSHD_ADDR!;
+    await page.getByLabel(/^Host$/i).fill(address.slice(0, address.lastIndexOf(":")));
+    await page.getByLabel(/^Port$/i).fill(address.slice(address.lastIndexOf(":") + 1));
+    await page.getByLabel(/^Username$/i).fill("tester");
+    await page.getByLabel(/^Password$/i).fill("s3cret");
+    const connect = page.getByRole("button", { name: /^Connect to server$/i });
+    await (tap ? connect.tap() : connect.click());
+    if (!firstVisit) return;
+    const trust = page.getByRole("button", { name: /trust and connect/i });
+    await (tap ? trust.tap() : trust.click());
+  }
+
+  /** Starts the download from the row and waits until more than half is written. */
+  async function downloadPastHalf(page: Page) {
+    // Desktop rows show their download button on hover or selection.
+    await page.getByRole("row").filter({ hasText: name }).click();
+    await page.getByRole("button", { name: `Download file ${name}` }).click();
+    await expect(page.getByText(new RegExp(`Downloading ${name}: (5[5-9]|[6-9]\\d)%`))).toBeVisible(
+      {
+        timeout: 20_000,
+      },
+    );
+  }
+
+  async function savedHash(download: Promise<import("@playwright/test").Download>) {
+    const stream = await (await download).createReadStream();
+    const hash = createHash("sha256");
+    for await (const chunk of stream) hash.update(chunk as Buffer);
+    return hash.digest("hex");
+  }
+
+  test.describe("on a phone", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test("resumes an 8 MiB download by offset after the session expires and Reconnect", async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      const relayPort = await new Promise<number>((resolve, reject) => {
+        const server = createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+          const bound = server.address();
+          server.close(() => resolve(typeof bound === "object" && bound ? bound.port : 0));
+        });
+      });
+      const relay = spawn("npm", ["run", "relay:local", "--", String(relayPort)], {
+        cwd: path.resolve("../relay"),
+        env: { ...process.env, KEEPALIVE_MAX_SECONDS: "2" },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      });
+      await new Promise<void>((resolve, reject) => {
+        relay.stdout.on("data", (data: Buffer) => {
+          if (data.toString().includes(`local relay listening on ${relayPort}`)) resolve();
+        });
+        relay.once("exit", (code) => reject(new Error(`short-grace relay exited: ${code}`)));
+      });
+      try {
+        await page.addInitScript((target) => {
+          const Original = window.WebSocket;
+          const sockets: WebSocket[] = [];
+          Object.assign(window, { testSockets: sockets });
+          window.WebSocket = class extends Original {
+            constructor(url: string | URL, protocols?: string | string[]) {
+              super(String(url).replace(/127\.0\.0\.1:\d+/, target), protocols);
+              sockets.push(this);
+            }
+          };
+        }, `127.0.0.1:${relayPort}`);
+        await slowOpfsWrites(page);
+        await page.goto("/");
+        await login(page, true);
+        await expect(page.getByRole("toolbar", { name: "Terminal keys" })).toBeVisible();
+        await page.getByRole("button", { name: "Actions" }).tap();
+        await page
+          .getByRole("group", { name: "Actions" })
+          .getByRole("button", { name: "Files" })
+          .tap();
+        await downloadPastHalf(page);
+
+        await page.evaluate(async () => {
+          window.dispatchEvent(new Event("pagehide"));
+          (window as unknown as { testSockets: WebSocket[] }).testSockets.at(-1)?.close();
+          await new Promise((resolve) => setTimeout(resolve, 3_000));
+          window.dispatchEvent(new Event("pageshow"));
+        });
+        await expect(page.getByText("Session expired.").first()).toBeVisible();
+        await expect(
+          page.getByText(new RegExp(`Download of ${name} stopped at \\d+%\\.`)),
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Reconnect" }).tap();
+        await page.getByLabel(/^Password$/i).fill("s3cret");
+        await page.getByRole("button", { name: /^Connect to server$/i }).tap();
+        await expect(page.getByRole("toolbar", { name: "Terminal keys" })).toBeVisible();
+
+        const files = page.getByRole("region", { name: "Files" });
+        if (!(await files.isVisible())) {
+          await page.getByRole("button", { name: "Actions" }).tap();
+          await page
+            .getByRole("group", { name: "Actions" })
+            .getByRole("button", { name: "Files" })
+            .tap();
+        }
+        await expect(
+          files.getByText(`${name} stopped at 50% when the connection closed.`),
+        ).toBeVisible();
+        await resetWrittenBytes(page);
+        const saved = page.waitForEvent("download");
+        await files.getByRole("button", { name: "Resume download" }).tap();
+        expect(await savedHash(saved)).toBe(sourceHash);
+        expect(await writtenBytes(page)).toBe(size - (4 << 20));
+      } finally {
+        process.kill(-relay.pid!, "SIGKILL");
+      }
+    });
+  });
+
+  test("offers resume after reload, restarts on a changed file or a missing segment", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await slowOpfsWrites(page);
+    await page.goto("/");
+    await login(page, false);
+    await page.getByRole("button", { name: "Files" }).click();
+    const files = page.getByRole("region", { name: "Files" });
+    await downloadPastHalf(page);
+
+    // Reload with a committed segment: resume is offered after login.
+    await page.reload();
+    await login(page, false, false);
+    await page.getByRole("button", { name: "Files" }).click();
+    await expect(
+      files.getByText(`${name} stopped at 50% when the connection closed.`),
+    ).toBeVisible();
+
+    // The remote file changes: X-06, and Retry downloads it whole.
+    utimesSync(remoteFile(), new Date(2001, 0, 1), new Date(2001, 0, 1));
+    await files.getByRole("button", { name: "Resume download" }).click();
+    await expect(
+      files.getByText("It changed on the server after the download started."),
+    ).toBeVisible();
+    await expect(files.getByRole("button", { name: "Resume download" })).toHaveCount(0);
+    await resetWrittenBytes(page);
+    let saved = page.waitForEvent("download");
+    await files.getByRole("button", { name: "Retry" }).click();
+    expect(await savedHash(saved)).toBe(sourceHash);
+    expect(await writtenBytes(page)).toBe(size);
+
+    // A segment lost to storage eviction: Resume restarts cleanly from 0.
+    await downloadPastHalf(page);
+    await page.reload();
+    await login(page, false, false);
+    await page.getByRole("button", { name: "Files" }).click();
+    const resume = files.getByRole("button", { name: "Resume download" });
+    await expect(resume).toBeVisible();
+    await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("localssh-downloads");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const records = await new Promise<{ createdAt: number; segments: string[] }[]>(
+        (resolve, reject) => {
+          const request = db.transaction("downloads").objectStore("downloads").getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        },
+      );
+      db.close();
+      const latest = records.sort((a, b) => b.createdAt - a.createdAt)[0]!;
+      await (await navigator.storage.getDirectory()).removeEntry(latest.segments[0]!);
+    });
+    await resetWrittenBytes(page);
+    saved = page.waitForEvent("download");
+    await resume.click();
+    expect(await savedHash(saved)).toBe(sourceHash);
+    expect(await writtenBytes(page)).toBe(size);
+  });
+});
