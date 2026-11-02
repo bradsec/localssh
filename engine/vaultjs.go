@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,12 +149,13 @@ func vaultUpsert(args []js.Value) (any, error) {
 	// Password is a pointer so that an absent field keeps the saved password
 	// and an explicit empty string clears it.
 	var wire struct {
-		ID       string  `json:"id"`
-		Nickname string  `json:"nickname"`
-		Host     string  `json:"host"`
-		Port     int     `json:"port"`
-		Username string  `json:"username"`
-		Password *string `json:"password"`
+		ID       string          `json:"id"`
+		Nickname string          `json:"nickname"`
+		Host     string          `json:"host"`
+		Port     int             `json:"port"`
+		Username string          `json:"username"`
+		Password *string         `json:"password"`
+		Terminal json.RawMessage `json:"terminal"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(values[0]))
 	decoder.DisallowUnknownFields()
@@ -164,6 +166,18 @@ func vaultUpsert(args []js.Value) (any, error) {
 		return nil, fmt.Errorf("vault: malformed entry: %w", err)
 	}
 
+	var terminal **vault.TerminalPrefs
+	if wire.Terminal != nil {
+		terminal = new(*vault.TerminalPrefs)
+		terminalDecoder := json.NewDecoder(bytes.NewReader(wire.Terminal))
+		terminalDecoder.DisallowUnknownFields()
+		if err := terminalDecoder.Decode(terminal); err != nil {
+			return nil, fmt.Errorf("vault: malformed terminal preferences: %w", err)
+		}
+		if err := ensureJSONEOF(terminalDecoder); err != nil {
+			return nil, fmt.Errorf("vault: malformed terminal preferences: %w", err)
+		}
+	}
 	next := unlocked.document.Clone()
 	if err := next.Upsert(vault.EntryUpdate{
 		ID:       wire.ID,
@@ -172,6 +186,7 @@ func vaultUpsert(args []js.Value) (any, error) {
 		Port:     wire.Port,
 		Username: wire.Username,
 		Password: wire.Password,
+		Terminal: terminal,
 	}); err != nil {
 		return nil, err
 	}

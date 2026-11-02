@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"sync"
 	"syscall/js"
 	"time"
@@ -191,11 +192,18 @@ func (f *sftpBridge) value() js.Value {
 		return promise(func() (any, error) { return nil, f.upload(name, local, overwrite, progress) })
 	})
 	download := js.FuncOf(func(_ js.Value, args []js.Value) any {
-		if len(args) != 3 || args[0].Type() != js.TypeString || args[1].Type() != js.TypeFunction || args[2].Type() != js.TypeFunction {
+		if len(args) < 3 || len(args) > 4 || args[0].Type() != js.TypeString || args[1].Type() != js.TypeFunction || args[2].Type() != js.TypeFunction {
 			return promise(func() (any, error) { return nil, errors.New("invalid download arguments") })
 		}
 		name, chunk, progress := args[0].String(), args[1], args[2]
-		return promise(func() (any, error) { return f.download(name, chunk, progress) })
+		opts, onStart := remotefiles.DownloadOptions{}, js.Undefined()
+		if len(args) == 4 && !args[3].IsUndefined() {
+			var err error
+			if opts, onStart, err = downloadOptions(args[3]); err != nil {
+				return promise(func() (any, error) { return nil, err })
+			}
+		}
+		return promise(func() (any, error) { return f.download(name, chunk, progress, opts, onStart) })
 	})
 	cancel := js.FuncOf(func(_ js.Value, _ []js.Value) any {
 		f.mu.Lock()
@@ -250,7 +258,44 @@ func (f *sftpBridge) upload(name string, local js.Value, overwrite bool, progres
 	return reporter.err
 }
 
-func (f *sftpBridge) download(name string, chunk, progress js.Value) (any, error) {
+// downloadOptions reads the page's { offset, expectSize, expectMtime, tail,
+// onStart } object. Every field is optional; offset defaults to 0.
+func downloadOptions(v js.Value) (remotefiles.DownloadOptions, js.Value, error) {
+	invalid := errors.New("invalid download options")
+	var opts remotefiles.DownloadOptions
+	if v.Type() != js.TypeObject {
+		return opts, js.Undefined(), invalid
+	}
+	numbers := []struct {
+		key string
+		dst *int64
+	}{{"offset", &opts.Offset}, {"expectSize", &opts.ExpectSize}, {"expectMtime", &opts.ExpectMtime}}
+	for _, n := range numbers {
+		field := v.Get(n.key)
+		if field.IsUndefined() {
+			continue
+		}
+		// 2^53 bounds the integers a JS number holds exactly.
+		if field.Type() != js.TypeNumber || field.Float() != float64(int64(field.Float())) || math.Abs(field.Float()) > 1<<53 {
+			return opts, js.Undefined(), invalid
+		}
+		*n.dst = int64(field.Float())
+	}
+	if tail := v.Get("tail"); !tail.IsUndefined() {
+		if !tail.InstanceOf(js.Global().Get("Uint8Array")) {
+			return opts, js.Undefined(), invalid
+		}
+		opts.Tail = make([]byte, tail.Length())
+		js.CopyBytesToGo(opts.Tail, tail)
+	}
+	onStart := v.Get("onStart")
+	if !onStart.IsUndefined() && onStart.Type() != js.TypeFunction {
+		return opts, js.Undefined(), invalid
+	}
+	return opts, onStart, nil
+}
+
+func (f *sftpBridge) download(name string, chunk, progress js.Value, opts remotefiles.DownloadOptions, onStart js.Value) (any, error) {
 	ctx, t, err := f.start()
 	if err != nil {
 		return nil, err
@@ -258,10 +303,23 @@ func (f *sftpBridge) download(name string, chunk, progress js.Value) (any, error
 	defer f.finish(t)
 	reporter := &percentReporter{callback: progress, last: -1}
 	var size int64
-	grew, err := remotefiles.Download(ctx, f.client, name, jsChunkWriter{chunk: chunk}, func(done, total int64) {
+	var startErr error
+	var start func(size, mtime int64)
+	if !onStart.IsUndefined() {
+		start = func(size, mtime int64) {
+			// A throwing onStart stops the transfer before any chunk is written.
+			if _, startErr = callJS(onStart, "call", js.Null(), map[string]any{"size": float64(size), "mtime": float64(mtime)}); startErr != nil {
+				t.cancel()
+			}
+		}
+	}
+	grew, err := remotefiles.Download(ctx, f.client, name, jsChunkWriter{chunk: chunk}, opts, start, func(done, total int64) {
 		size = total
 		reporter.report(done, total)
 	})
+	if startErr != nil {
+		return nil, startErr
+	}
 	if err != nil {
 		return nil, err
 	}

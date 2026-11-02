@@ -130,7 +130,48 @@ func connect(relayWsURL, host, port, username, password string, key, passphrase 
 		}
 	}
 
-	conn, err := wsconn.Dial(ctx, relayWsURL, host, port)
+	graceValue := callbacks.Get("keepAliveMs")
+	resumable := graceValue.Type() != js.TypeUndefined
+	var requestedGraceMs *int64
+	if resumable && graceValue.Type() != js.TypeNull {
+		if graceValue.Type() != js.TypeNumber || !isFiniteInteger(graceValue.Float()) || graceValue.Float() < 1 || graceValue.Float() > 9007199254740991 {
+			cancel()
+			reject.Invoke("keepAliveMs must be a positive safe integer or null")
+			return
+		}
+		value := int64(graceValue.Float())
+		requestedGraceMs = &value
+	}
+	var conn *wsconn.Conn
+	var err error
+	var session *sshclient.Session
+	if resumable {
+		conn, err = wsconn.DialResumable(ctx, relayWsURL, host, port, requestedGraceMs, func(status string, info *wsconn.GraceInfo) {
+			if session != nil {
+				if status == "reconnecting" {
+					session.PauseKeepalives()
+				} else if status == "connected" {
+					session.ResumeKeepalives()
+				}
+			}
+			if callbacks.Get("onTransportStatus").Type() == js.TypeFunction {
+				if info != nil {
+					var granted, cap any
+					if info.GrantedGraceMs != nil {
+						granted = float64(*info.GrantedGraceMs)
+					}
+					if info.CapGraceMs != nil {
+						cap = float64(*info.CapGraceMs)
+					}
+					_, _ = callJS(callbacks, "onTransportStatus", status, map[string]any{"grantedGraceMs": granted, "capGraceMs": cap})
+				} else {
+					_, _ = callJS(callbacks, "onTransportStatus", status)
+				}
+			}
+		})
+	} else {
+		conn, err = wsconn.Dial(ctx, relayWsURL, host, port)
+	}
 	if err != nil {
 		cancel()
 		reject.Invoke(err.Error())
@@ -148,7 +189,6 @@ func connect(relayWsURL, host, port, username, password string, key, passphrase 
 		return nil
 	}
 
-	var session *sshclient.Session
 	if signer != nil {
 		session, err = sshclient.ConnectWithKey(ctx, conn, net.JoinHostPort(host, port), username, signer, verify)
 	} else {
@@ -169,6 +209,7 @@ func connect(relayWsURL, host, port, username, password string, key, passphrase 
 	bridge := &sessionBridge{
 		cancel:    cancel,
 		conn:      conn,
+		resumable: resumable,
 		session:   session,
 		callbacks: callbacks,
 	}
@@ -199,6 +240,7 @@ func callJS(object js.Value, method string, args ...any) (value js.Value, err er
 type sessionBridge struct {
 	cancel    context.CancelFunc
 	conn      *wsconn.Conn
+	resumable bool
 	session   *sshclient.Session
 	callbacks js.Value
 	// writes carries input to the session off the callback goroutine; see
@@ -247,19 +289,27 @@ func (b *sessionBridge) handle() js.Value {
 		return nil
 	})
 	closeSession := js.FuncOf(func(this js.Value, args []js.Value) any {
+		if b.resumable {
+			go func() { _ = b.close(nil) }()
+			return nil
+		}
 		if err := b.close(nil); err != nil {
 			return err.Error()
 		}
 		return nil
 	})
 	openFiles := js.FuncOf(func(this js.Value, args []js.Value) any { return b.openFiles() })
-	b.funcs = []js.Func{write, resize, closeSession, openFiles}
+	detach := js.FuncOf(func(this js.Value, args []js.Value) any { b.conn.Detach(); return nil })
+	resume := js.FuncOf(func(this js.Value, args []js.Value) any { b.conn.Resume(); return nil })
+	b.funcs = []js.Func{write, resize, closeSession, openFiles, detach, resume}
 
 	return js.ValueOf(map[string]any{
 		"write":     write,
 		"resize":    resize,
 		"close":     closeSession,
 		"openFiles": openFiles,
+		"detach":    detach,
+		"resume":    resume,
 	})
 }
 
@@ -332,6 +382,9 @@ func (b *sessionBridge) finishClose(reason func() string) error {
 	message := ""
 	if reason != nil {
 		message = reason()
+	}
+	if err != nil && message == "" {
+		message = err.Error()
 	}
 	if _, callbackErr := callJS(b.callbacks, "onClose", message); callbackErr != nil {
 		err = errors.Join(err, callbackErr)

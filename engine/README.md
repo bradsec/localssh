@@ -64,7 +64,12 @@ handshake, and authentication.
 
 `openFiles()` opens SFTP on the existing verified SSH session. The file handle
 also exposes `upload(path, file, overwrite, onProgress)` and
-`download(path, onChunk, onProgress)`. Uploads stage in a hidden remote file;
+`download(path, onChunk, onProgress, opts?)`. `opts` is
+`{ offset, expectSize, expectMtime, tail, onStart }`: above offset 0 the
+download resumes there only when the remote size and mtime (Unix ms) match and
+the remote bytes before `offset` equal `tail`, otherwise it rejects with
+`remote file changed`. `onStart({ size, mtime })` runs before the first chunk.
+Uploads stage in a hidden remote file;
 `close()` on the file handle leaves the terminal open. Closing the SSH handle
 closes both. The frontend [user guide](../docs/USER-GUIDE.md) describes the
 visible file behavior.

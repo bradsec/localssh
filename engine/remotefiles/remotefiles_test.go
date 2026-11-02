@@ -184,7 +184,7 @@ func TestUploadDownloadLargerThanOneChunk(t *testing.T) {
 	}
 	var got bytes.Buffer
 	var done, total int64
-	if _, err := Download(t.Context(), client, "big.bin", &got, func(d, tot int64) { done, total = d, tot }); err != nil {
+	if _, err := Download(t.Context(), client, "big.bin", &got, DownloadOptions{}, nil, func(d, tot int64) { done, total = d, tot }); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got.Bytes(), data) || done != total || total != int64(len(data)) {
@@ -351,7 +351,7 @@ func TestCancelledDownload(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	var got bytes.Buffer
-	_, err := Download(ctx, client, "big.bin", &got, func(done, _ int64) {
+	_, err := Download(ctx, client, "big.bin", &got, DownloadOptions{}, nil, func(done, _ int64) {
 		if done >= 64<<10 {
 			cancel()
 		}
@@ -369,7 +369,7 @@ func TestDownloadRejectsFolderAndFollowsLink(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Download(t.Context(), client, "dir", &bytes.Buffer{}, nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+	if _, err := Download(t.Context(), client, "dir", &bytes.Buffer{}, DownloadOptions{}, nil, nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("folder download: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("via link"), 0o644); err != nil {
@@ -379,7 +379,7 @@ func TestDownloadRejectsFolderAndFollowsLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got bytes.Buffer
-	if _, err := Download(t.Context(), client, "link", &got, nil); err != nil || got.String() != "via link" {
+	if _, err := Download(t.Context(), client, "link", &got, DownloadOptions{}, nil, nil); err != nil || got.String() != "via link" {
 		t.Fatalf("link download %q, err %v", got.String(), err)
 	}
 }
@@ -433,7 +433,7 @@ func TestDownloadStopsAtStatSize(t *testing.T) {
 	}
 	grown := false
 	var got bytes.Buffer
-	grew, err := Download(t.Context(), client, "log.bin", &got, func(done, _ int64) {
+	grew, err := Download(t.Context(), client, "log.bin", &got, DownloadOptions{}, nil, func(done, _ int64) {
 		if grown {
 			return
 		}
@@ -474,5 +474,122 @@ func TestReplaceDropsSpecialBits(t *testing.T) {
 	}
 	if info.Mode() != 0o751 {
 		t.Fatalf("mode %v, want -rwxr-x--x", info.Mode())
+	}
+}
+
+// resumeFixture writes a file larger than one MiB and returns its bytes and
+// the size and mtime a transfer record would hold.
+func resumeFixture(t *testing.T, root string) (data []byte, size, mtime int64) {
+	t.Helper()
+	data = randomBytes(t, 3<<20+17)
+	target := filepath.Join(root, "big.bin")
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SFTP v3 carries whole seconds, so the record holds what List reports.
+	return data, info.Size(), info.ModTime().Unix() * 1000
+}
+
+func TestDownloadResumesFromOffset(t *testing.T) {
+	client, root := connect(t)
+	data, size, mtime := resumeFixture(t, root)
+	const offset = 1 << 20
+	opts := DownloadOptions{Offset: offset, ExpectSize: size, ExpectMtime: mtime, Tail: data[offset-4096 : offset]}
+	var got bytes.Buffer
+	var startSize, startMtime, done, total int64
+	grew, err := Download(t.Context(), client, "big.bin", &got, opts, func(s, m int64) { startSize, startMtime = s, m }, func(d, tot int64) { done, total = d, tot })
+	if err != nil || grew {
+		t.Fatalf("grew %v, err %v", grew, err)
+	}
+	if startSize != size || startMtime != mtime {
+		t.Fatalf("onStart got %d, %d; want %d, %d", startSize, startMtime, size, mtime)
+	}
+	if !bytes.Equal(append(bytes.Clone(data[:offset]), got.Bytes()...), data) {
+		t.Fatalf("resumed bytes differ from a full read: %d bytes after offset", got.Len())
+	}
+	if done != size || total != size {
+		t.Fatalf("progress ended at %d/%d, want %d/%d", done, total, size, size)
+	}
+}
+
+func TestDownloadResumeDetectsRemoteChange(t *testing.T) {
+	client, root := connect(t)
+	data, size, mtime := resumeFixture(t, root)
+	const offset = 1 << 20
+	tail := data[offset-4096 : offset]
+	changedTail := bytes.Clone(tail)
+	changedTail[len(changedTail)-1] ^= 0xff
+	cases := map[string]DownloadOptions{
+		"mtime": {Offset: offset, ExpectSize: size, ExpectMtime: mtime - 1000, Tail: tail},
+		"size":  {Offset: offset, ExpectSize: size + 1, ExpectMtime: mtime, Tail: tail},
+		"tail":  {Offset: offset, ExpectSize: size, ExpectMtime: mtime, Tail: changedTail},
+	}
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			var got bytes.Buffer
+			started := false
+			_, err := Download(t.Context(), client, "big.bin", &got, opts, func(int64, int64) { started = true }, nil)
+			if !errors.Is(err, ErrRemoteChanged) {
+				t.Fatalf("got %v, want ErrRemoteChanged", err)
+			}
+			if err.Error() != "remote file changed" {
+				t.Fatalf("sentinel text %q", err.Error())
+			}
+			if got.Len() != 0 || started {
+				t.Fatalf("wrote %d bytes, started %v after a mismatch", got.Len(), started)
+			}
+		})
+	}
+}
+
+func TestDownloadOffsetZeroIgnoresExpectations(t *testing.T) {
+	client, root := connect(t)
+	data, size, mtime := resumeFixture(t, root)
+	var got bytes.Buffer
+	var startSize, startMtime int64
+	opts := DownloadOptions{ExpectSize: size + 1, ExpectMtime: mtime - 1000, Tail: []byte("x")}
+	if _, err := Download(t.Context(), client, "big.bin", &got, opts, func(s, m int64) { startSize, startMtime = s, m }, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got.Bytes(), data) || startSize != size || startMtime != mtime {
+		t.Fatalf("%d bytes, onStart %d, %d", got.Len(), startSize, startMtime)
+	}
+}
+
+func TestDownloadRejectsInvalidResumeOptions(t *testing.T) {
+	client, root := connect(t)
+	data, size, mtime := resumeFixture(t, root)
+	cases := map[string]DownloadOptions{
+		"negative offset": {Offset: -1, ExpectSize: size, ExpectMtime: mtime},
+		"no tail":         {Offset: 1 << 20, ExpectSize: size, ExpectMtime: mtime},
+		"tail too long":   {Offset: 4, ExpectSize: size, ExpectMtime: mtime, Tail: data[:8]},
+		"past the end":    {Offset: size + 1, ExpectSize: size, ExpectMtime: mtime, Tail: data[:4]},
+	}
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			var got bytes.Buffer
+			_, err := Download(t.Context(), client, "big.bin", &got, opts, nil, nil)
+			if err == nil || errors.Is(err, ErrRemoteChanged) || !strings.Contains(err.Error(), "invalid download options") {
+				t.Fatalf("got %v, want invalid download options", err)
+			}
+			if got.Len() != 0 {
+				t.Fatalf("wrote %d bytes", got.Len())
+			}
+		})
+	}
+}
+
+func TestDownloadResumeAtEndWritesNothing(t *testing.T) {
+	client, root := connect(t)
+	data, size, mtime := resumeFixture(t, root)
+	var got bytes.Buffer
+	opts := DownloadOptions{Offset: size, ExpectSize: size, ExpectMtime: mtime, Tail: data[size-4096:]}
+	grew, err := Download(t.Context(), client, "big.bin", &got, opts, nil, nil)
+	if err != nil || grew || got.Len() != 0 {
+		t.Fatalf("grew %v, err %v, wrote %d bytes", grew, err, got.Len())
 	}
 }

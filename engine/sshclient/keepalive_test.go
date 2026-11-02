@@ -45,7 +45,7 @@ func TestKeepalivesCloseAfterMissedReplies(t *testing.T) {
 	conn := &keepaliveConn{reply: make(chan struct{}), closed: make(chan struct{})}
 	stop := make(chan struct{})
 	defer close(stop)
-	go runKeepalives(conn, stop, 10*time.Millisecond, 3)
+	go runKeepalives(&Session{conn: conn, keepaliveStop: stop, keepaliveChanged: make(chan struct{}, 1)}, 10*time.Millisecond, 3)
 
 	select {
 	case <-conn.closed:
@@ -65,7 +65,7 @@ func TestKeepalivesAcceptFailureReply(t *testing.T) {
 		conn.reply <- struct{}{}
 	}
 	go func() {
-		runKeepalives(conn, stop, 10*time.Millisecond, 3)
+		runKeepalives(&Session{conn: conn, keepaliveStop: stop, keepaliveChanged: make(chan struct{}, 1)}, 10*time.Millisecond, 3)
 		close(done)
 	}()
 	for range 3 {
@@ -82,4 +82,40 @@ func TestKeepalivesAcceptFailureReply(t *testing.T) {
 		t.Fatal("connection closed despite replies")
 	default:
 	}
+}
+
+func TestKeepalivesPauseAndResume(t *testing.T) {
+	conn := &keepaliveConn{reply: make(chan struct{}), sent: make(chan struct{}, 10), closed: make(chan struct{})}
+	session := &Session{conn: conn, keepaliveStop: make(chan struct{}), keepaliveChanged: make(chan struct{}, 1)}
+	done := make(chan struct{})
+	go func() {
+		runKeepalives(session, 10*time.Millisecond, 3)
+		close(done)
+	}()
+	select {
+	case <-conn.sent:
+	case <-time.After(time.Second):
+		t.Fatal("first keepalive was not sent")
+	}
+	session.PauseKeepalives()
+	session.PauseKeepalives()
+	time.Sleep(100 * time.Millisecond)
+	if got := conn.calls.Load(); got != 1 {
+		t.Fatalf("sent %d probes while paused, want 1", got)
+	}
+	select {
+	case <-conn.closed:
+		t.Fatal("missed replies closed connection while paused")
+	default:
+	}
+	conn.reply <- struct{}{}
+	session.ResumeKeepalives()
+	session.ResumeKeepalives()
+	select {
+	case <-conn.sent:
+	case <-time.After(time.Second):
+		t.Fatal("keepalives did not resume")
+	}
+	close(session.keepaliveStop)
+	<-done
 }
