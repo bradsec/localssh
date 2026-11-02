@@ -1,4 +1,5 @@
 import { parseAccessConfig } from "../src/access.js";
+import { parseKeepaliveMaxGraceMs } from "../src/keepalive-config.js";
 import { closeLocalRelay, startLocalRelay } from "../src/local-relay.js";
 
 const port = Number(process.env.PORT ?? 8787);
@@ -17,8 +18,10 @@ function positiveInteger(name: string, fallback: number): number {
 }
 
 let accessConfig;
+let maxGraceMs: number | null;
 try {
   accessConfig = parseAccessConfig(process.env);
+  maxGraceMs = parseKeepaliveMaxGraceMs(process.env);
   if (accessConfig.allowedOrigins.length === 0) {
     throw new Error("ALLOWED_ORIGINS is required");
   }
@@ -36,6 +39,7 @@ const relay = startLocalRelay({
   accessConfig,
   maxSessions: positiveInteger("MAX_SESSIONS", 256),
   targetConnectTimeoutMs: positiveInteger("TARGET_CONNECT_TIMEOUT_MS", 10_000),
+  maxGraceMs,
 });
 let shuttingDown = false;
 

@@ -63,6 +63,47 @@ it("serves the page and WASM with security headers, and keeps /relay for WebSock
   }
 });
 
+it("answers capabilities before static files and the /relay 404", async () => {
+  const server = createServer(
+    createWebHandler(root, {
+      capabilities: {
+        maxGraceMs: 120_000,
+        accessConfig: parseAccessConfig({ ALLOWED_HOSTS: "*", ALLOWED_ORIGINS: "*" }),
+        sameOrigin: true,
+      },
+    }),
+  );
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${base}/relay/capabilities`, {
+      headers: { Origin: base },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ protocols: [1, 2], resume: true, maxGraceMs: 120_000 });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect((await fetch(`${base}/capabilities`)).status).toBe(200);
+    expect((await fetch(`${base}/relay/capabilities`, { method: "POST" })).status).toBe(405);
+    expect((await fetch(`${base}/relay/other`)).status).toBe(404);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it("leaves /relay/capabilities as a 404 when no capability policy is given", async () => {
+  const server = createServer(createWebHandler(root));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+  try {
+    expect((await fetch(`http://127.0.0.1:${address.port}/relay/capabilities`)).status).toBe(404);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
