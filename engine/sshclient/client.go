@@ -43,6 +43,8 @@ type Session struct {
 	requestsDone      chan struct{}
 	keepaliveStop     chan struct{}
 	keepaliveStopOnce sync.Once
+	keepalivePaused   atomic.Bool
+	keepaliveChanged  chan struct{}
 }
 
 // Client returns the underlying *ssh.Client, for opening additional
@@ -145,38 +147,71 @@ func connect(ctx context.Context, conn net.Conn, hostPort, username string, auth
 	}
 
 	session := &Session{
-		conn:          sshConn,
-		client:        client,
-		channel:       channel,
-		exited:        exited,
-		requestsDone:  requestsDone,
-		keepaliveStop: make(chan struct{}),
+		conn:             sshConn,
+		client:           client,
+		channel:          channel,
+		exited:           exited,
+		requestsDone:     requestsDone,
+		keepaliveStop:    make(chan struct{}),
+		keepaliveChanged: make(chan struct{}, 1),
 	}
-	go runKeepalives(session.conn, session.keepaliveStop, keepaliveInterval, keepaliveMaxMisses)
+	go runKeepalives(session, keepaliveInterval, keepaliveMaxMisses)
 	return session, nil
 }
 
-func runKeepalives(conn ssh.Conn, stop <-chan struct{}, interval time.Duration, maxMisses int) {
+// PauseKeepalives stops probes while the transport is detached.
+func (s *Session) PauseKeepalives() {
+	if !s.keepalivePaused.Swap(true) {
+		select {
+		case s.keepaliveChanged <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// ResumeKeepalives restarts probes at their normal interval.
+func (s *Session) ResumeKeepalives() {
+	if s.keepalivePaused.Swap(false) {
+		select {
+		case s.keepaliveChanged <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func runKeepalives(s *Session, interval time.Duration, maxMisses int) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var reply <-chan error
 	misses := 0
 	for {
 		select {
-		case <-stop:
+		case <-s.keepaliveStop:
 			return
+		case <-s.keepaliveChanged:
+			misses = 0
+			if s.keepalivePaused.Load() {
+				ticker.Stop()
+			} else {
+				ticker.Reset(interval)
+			}
 		case err := <-reply:
 			if err != nil {
-				_ = conn.Close()
-				return
+				if !s.keepalivePaused.Load() {
+					_ = s.conn.Close()
+					return
+				}
 			}
 			reply = nil
 			misses = 0
 		case <-ticker.C:
+			if s.keepalivePaused.Load() {
+				continue
+			}
 			if reply != nil {
 				misses++
 				if misses >= maxMisses {
-					_ = conn.Close()
+					_ = s.conn.Close()
 					return
 				}
 				continue
@@ -184,7 +219,7 @@ func runKeepalives(conn ssh.Conn, stop <-chan struct{}, interval time.Duration, 
 			result := make(chan error, 1)
 			reply = result
 			go func() {
-				_, _, err := conn.SendRequest("keepalive@openssh.com", true, nil)
+				_, _, err := s.conn.SendRequest("keepalive@openssh.com", true, nil)
 				result <- err
 			}()
 		}
@@ -290,5 +325,5 @@ func (s *Session) ExitReported() bool {
 
 func (s *Session) Close() error {
 	s.keepaliveStopOnce.Do(func() { close(s.keepaliveStop) })
-	return errors.Join(s.channel.Close(), s.conn.Close())
+	return errors.Join(s.conn.Close(), s.channel.Close())
 }

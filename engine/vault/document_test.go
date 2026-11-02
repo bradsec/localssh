@@ -3,9 +3,73 @@ package vault
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
+
+func TestTerminalPrefsRoundTrip(t *testing.T) {
+	prefs := &TerminalPrefs{FontFamily: "JetBrains Mono", FontSize: 16, LineHeight: 1.35, ThemeName: "dark"}
+	d := NewDocument()
+	if err := d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Terminal: &prefs}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	encoded, err := d.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	parsed, err := ParseDocument(encoded)
+	if err != nil {
+		t.Fatalf("ParseDocument: %v", err)
+	}
+	if parsed.Entries[0].Terminal == nil || *parsed.Entries[0].Terminal != *prefs {
+		t.Fatalf("terminal = %+v, want %+v", parsed.Entries[0].Terminal, prefs)
+	}
+	if d.Redacted()[0].Terminal == nil || *d.Redacted()[0].Terminal != *prefs {
+		t.Fatalf("redacted terminal = %+v, want %+v", d.Redacted()[0].Terminal, prefs)
+	}
+}
+
+func TestParseLegacyDocumentWithoutTerminal(t *testing.T) {
+	d, err := ParseDocument([]byte(`{"v":1,"entries":[{"id":"a","nickname":"web","host":"h","port":22}]}`))
+	if err != nil || d.Entries[0].Terminal != nil {
+		t.Fatalf("ParseDocument = %+v, %v; want entry without terminal", d, err)
+	}
+}
+
+func TestTerminalPrefsRejectsInvalidValues(t *testing.T) {
+	cases := map[string]TerminalPrefs{
+		"font too small": {FontFamily: "mono", FontSize: 7, LineHeight: 1.15, ThemeName: "dark"},
+		"font too large": {FontFamily: "mono", FontSize: 33, LineHeight: 1.15, ThemeName: "dark"},
+		"line too small": {FontFamily: "mono", FontSize: 14, LineHeight: 0.95, ThemeName: "dark"},
+		"line too large": {FontFamily: "mono", FontSize: 14, LineHeight: 2.05, ThemeName: "dark"},
+		"line off step":  {FontFamily: "mono", FontSize: 14, LineHeight: 1.33, ThemeName: "dark"},
+		"line nonfinite": {FontFamily: "mono", FontSize: 14, LineHeight: math.NaN(), ThemeName: "dark"},
+	}
+	for name, prefs := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := NewDocument()
+			value := &prefs
+			if err := d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Terminal: &value}); !errors.Is(err, ErrInvalidEntry) {
+				t.Fatalf("Upsert error = %v, want ErrInvalidEntry", err)
+			}
+		})
+	}
+}
+
+func TestUpsertKeepsOrClearsTerminal(t *testing.T) {
+	prefs := &TerminalPrefs{FontFamily: "mono", FontSize: 14, LineHeight: 1.15, ThemeName: "dark"}
+	d := NewDocument()
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "web", Host: "h", Port: 22, Terminal: &prefs})
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "renamed", Host: "h", Port: 22})
+	if d.Entries[0].Terminal == nil || *d.Entries[0].Terminal != *prefs {
+		t.Fatalf("absent update lost terminal: %+v", d.Entries[0].Terminal)
+	}
+	_ = d.Upsert(EntryUpdate{ID: "a", Nickname: "renamed", Host: "h", Port: 22, Terminal: new(*TerminalPrefs)})
+	if d.Entries[0].Terminal != nil {
+		t.Fatalf("explicit null kept terminal: %+v", d.Entries[0].Terminal)
+	}
+}
 
 func TestUpsertAddsAndUpdates(t *testing.T) {
 	d := NewDocument()

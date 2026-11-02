@@ -7,7 +7,49 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
+
+type closeOrderConn struct {
+	ssh.Conn
+	closed chan struct{}
+}
+
+func (c closeOrderConn) Close() error {
+	close(c.closed)
+	return nil
+}
+
+type blockedCloseChannel struct {
+	ssh.Channel
+	closed <-chan struct{}
+}
+
+func (c blockedCloseChannel) Close() error {
+	<-c.closed
+	return nil
+}
+
+func TestCloseUnblocksChannelCloseWhenTransportIsFull(t *testing.T) {
+	closed := make(chan struct{})
+	session := &Session{
+		conn:          closeOrderConn{closed: closed},
+		channel:       blockedCloseChannel{closed: closed},
+		keepaliveStop: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() { done <- session.Close() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("close session: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("session close blocked before transport close")
+	}
+}
 
 func TestConnectAuthAndEcho(t *testing.T) {
 	server, err := NewTestServer("tester", "s3cret")

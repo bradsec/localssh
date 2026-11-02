@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -29,12 +30,20 @@ var (
 // that exclude them: the level is derived from which fields are set rather
 // than stored, so no enum can disagree with the data.
 type Entry struct {
-	ID       string `json:"id"`
-	Nickname string `json:"nickname"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
+	ID       string         `json:"id"`
+	Nickname string         `json:"nickname"`
+	Host     string         `json:"host"`
+	Port     int            `json:"port"`
+	Username string         `json:"username,omitempty"`
+	Password string         `json:"password,omitempty"`
+	Terminal *TerminalPrefs `json:"terminal,omitempty"`
+}
+
+type TerminalPrefs struct {
+	FontFamily string  `json:"fontFamily"`
+	FontSize   int     `json:"fontSize"`
+	LineHeight float64 `json:"lineHeight"`
+	ThemeName  string  `json:"themeName"`
 }
 
 // EntryUpdate is an upsert request. A nil Password keeps whatever is already
@@ -46,16 +55,19 @@ type EntryUpdate struct {
 	Port     int
 	Username string
 	Password *string
+	// Nil keeps the saved value; a pointer to nil clears it.
+	Terminal **TerminalPrefs
 }
 
 // RedactedEntry is the only entry shape that crosses into JavaScript.
 type RedactedEntry struct {
-	ID          string `json:"id"`
-	Nickname    string `json:"nickname"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Username    string `json:"username,omitempty"`
-	HasPassword bool   `json:"hasPassword"`
+	ID          string         `json:"id"`
+	Nickname    string         `json:"nickname"`
+	Host        string         `json:"host"`
+	Port        int            `json:"port"`
+	Username    string         `json:"username,omitempty"`
+	HasPassword bool           `json:"hasPassword"`
+	Terminal    *TerminalPrefs `json:"terminal,omitempty"`
 }
 
 // Document is the vault plaintext. It exists only inside the ciphertext.
@@ -110,6 +122,11 @@ func (d *Document) Marshal() ([]byte, error) {
 func (d *Document) Clone() *Document {
 	entries := make([]Entry, len(d.Entries))
 	copy(entries, d.Entries)
+	for i := range entries {
+		if entries[i].Terminal != nil {
+			entries[i].Terminal = new(*entries[i].Terminal)
+		}
+	}
 	return &Document{V: d.V, Entries: entries}
 }
 
@@ -144,6 +161,18 @@ func (d *Document) Upsert(u EntryUpdate) error {
 	}
 
 	existing := d.indexOf(entry.ID)
+	if u.Terminal != nil {
+		entry.Terminal = *u.Terminal
+	} else if existing >= 0 {
+		entry.Terminal = d.Entries[existing].Terminal
+	}
+	if entry.Terminal != nil {
+		prefs := entry.Terminal
+		if prefs.FontSize < 8 || prefs.FontSize > 32 ||
+			!isValidLineHeight(prefs.LineHeight) {
+			return fmt.Errorf("%w: terminal preferences out of range", ErrInvalidEntry)
+		}
+	}
 
 	switch {
 	case u.Password != nil:
@@ -171,17 +200,35 @@ func (d *Document) Upsert(u EntryUpdate) error {
 
 func validateEntry(entry Entry) error {
 	password := entry.Password
+	terminal := entry.Terminal
 	d := NewDocument()
 	if err := d.Upsert(EntryUpdate{
 		ID: entry.ID, Nickname: entry.Nickname, Host: entry.Host, Port: entry.Port,
-		Username: entry.Username, Password: &password,
+		Username: entry.Username, Password: &password, Terminal: &terminal,
 	}); err != nil {
 		return err
 	}
-	if len(d.Entries) != 1 || d.Entries[0] != entry {
+	if len(d.Entries) != 1 {
+		return fmt.Errorf("%w: entry is not canonical", ErrInvalidEntry)
+	}
+	got := d.Entries[0]
+	if (got.Terminal == nil) != (entry.Terminal == nil) ||
+		got.Terminal != nil && *got.Terminal != *entry.Terminal {
+		return fmt.Errorf("%w: entry is not canonical", ErrInvalidEntry)
+	}
+	got.Terminal, entry.Terminal = nil, nil
+	if got != entry {
 		return fmt.Errorf("%w: entry is not canonical", ErrInvalidEntry)
 	}
 	return nil
+}
+
+func isValidLineHeight(value float64) bool {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 1 || value > 2 {
+		return false
+	}
+	steps := value * 20
+	return math.Abs(steps-math.Round(steps)) <= 1e-9
 }
 
 func (d *Document) Delete(id string) bool {
@@ -206,6 +253,7 @@ func (d *Document) Redacted() []RedactedEntry {
 			Port:        entry.Port,
 			Username:    entry.Username,
 			HasPassword: entry.Password != "",
+			Terminal:    entry.Terminal,
 		})
 	}
 	return redacted

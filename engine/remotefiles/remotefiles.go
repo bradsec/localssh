@@ -5,6 +5,7 @@
 package remotefiles
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -241,11 +242,29 @@ func (r *cancelReader) Read(p []byte) (int, error) {
 // errGrew stops a download that reached the size Stat reported.
 var errGrew = errors.New("file grew during download")
 
+// ErrRemoteChanged reports that a resumed download found the remote file
+// different from the one the earlier bytes came from.
+var ErrRemoteChanged = errors.New("remote file changed")
+
+// DownloadOptions resumes a download. Offset 0 starts from the beginning and
+// ignores the other fields. Above 0, the remote size and mtime (Unix
+// milliseconds, as List reports) must equal ExpectSize and ExpectMtime, and
+// the remote bytes just before Offset must equal Tail.
+type DownloadOptions struct {
+	Offset                  int64
+	ExpectSize, ExpectMtime int64
+	Tail                    []byte
+}
+
 // Download streams the regular file at name, following a symbolic link, to
-// dst. progress receives bytes written and the file's size. It writes at most
-// the size Stat reported when it started and returns grew when the server had
-// more data.
-func Download(ctx context.Context, c *sftp.Client, name string, dst io.Writer, progress func(done, total int64)) (grew bool, err error) {
+// dst, starting at opts.Offset. onStart, when set, receives the size and
+// mtime before any bytes are written. progress receives the absolute bytes
+// done and the file's size. It writes at most the size Stat reported when it
+// started and returns grew when the server had more data.
+func Download(ctx context.Context, c *sftp.Client, name string, dst io.Writer, opts DownloadOptions, onStart func(size, mtime int64), progress func(done, total int64)) (grew bool, err error) {
+	if opts.Offset < 0 || (opts.Offset > 0 && (len(opts.Tail) == 0 || int64(len(opts.Tail)) > opts.Offset)) {
+		return false, errors.New("invalid download options")
+	}
 	info, err := c.Stat(name)
 	if err != nil {
 		return false, err
@@ -253,12 +272,40 @@ func Download(ctx context.Context, c *sftp.Client, name string, dst io.Writer, p
 	if !info.Mode().IsRegular() {
 		return false, errors.New("not a regular file")
 	}
+	size, mtime := info.Size(), info.ModTime().UnixMilli()
+	if opts.Offset > 0 {
+		if size != opts.ExpectSize || mtime != opts.ExpectMtime {
+			return false, ErrRemoteChanged
+		}
+		if opts.Offset > size {
+			return false, errors.New("invalid download options: offset past the end")
+		}
+	}
 	remote, err := c.Open(name)
 	if err != nil {
 		return false, err
 	}
 	defer remote.Close()
-	w := &cancelWriter{ctx: ctx, w: dst, total: info.Size(), progress: progress}
+	if opts.Offset > 0 {
+		tail := make([]byte, len(opts.Tail))
+		if _, err := remote.ReadAt(tail, opts.Offset-int64(len(tail))); err != nil {
+			if errors.Is(err, io.EOF) {
+				return false, ErrRemoteChanged
+			}
+			return false, err
+		}
+		if !bytes.Equal(tail, opts.Tail) {
+			return false, ErrRemoteChanged
+		}
+		// WriteTo reads from the handle offset (pkg/sftp v1.13.12).
+		if _, err := remote.Seek(opts.Offset, io.SeekStart); err != nil {
+			return false, err
+		}
+	}
+	if onStart != nil {
+		onStart(size, mtime)
+	}
+	w := &cancelWriter{ctx: ctx, w: dst, written: opts.Offset, total: size, progress: progress}
 	if _, err := remote.WriteTo(w); err != nil {
 		if ctx.Err() != nil {
 			return false, ErrCancelled
