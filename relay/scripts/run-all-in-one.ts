@@ -3,6 +3,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { resolve } from "node:path";
 import { parseAccessConfig } from "../src/access.js";
+import { parseKeepaliveMaxGraceMs } from "../src/keepalive-config.js";
 import { closeLocalRelay, startLocalRelay } from "../src/local-relay.js";
 import { createWebHandler } from "../src/web-server.js";
 
@@ -13,25 +14,30 @@ const key = process.env.TLS_KEY_FILE;
 if (Boolean(cert) !== Boolean(key))
   throw new Error("TLS_CERT_FILE and TLS_KEY_FILE must both be set");
 
-const handler = createWebHandler(resolve(process.env.STATIC_ROOT ?? "/app/frontend"));
-const server =
-  cert && key
-    ? createHttpsServer({ cert: readFileSync(cert), key: readFileSync(key) }, handler)
-    : createHttpServer(handler);
 const accessConfig = parseAccessConfig({
   ...process.env,
   ALLOWED_HOSTS: process.env.ALLOWED_HOSTS ?? "*",
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS ?? "*",
 });
+const sameOrigin = !process.env.ALLOWED_ORIGINS;
+const maxGraceMs = parseKeepaliveMaxGraceMs(process.env);
+const handler = createWebHandler(resolve(process.env.STATIC_ROOT ?? "/app/frontend"), {
+  capabilities: { maxGraceMs, accessConfig, sameOrigin },
+});
+const server =
+  cert && key
+    ? createHttpsServer({ cert: readFileSync(cert), key: readFileSync(key) }, handler)
+    : createHttpServer(handler);
 const relay = startLocalRelay({
   port,
   server,
   path: "/relay",
-  sameOrigin: !process.env.ALLOWED_ORIGINS,
+  sameOrigin,
   publicHosts: process.env.PUBLIC_HOSTS?.split(",") ?? [],
   accessConfig,
   maxSessions: Number(process.env.MAX_SESSIONS ?? 256),
   targetConnectTimeoutMs: Number(process.env.TARGET_CONNECT_TIMEOUT_MS ?? 10_000),
+  maxGraceMs,
 });
 server.listen(port, process.env.HOST ?? "0.0.0.0");
 server.once("error", (error) => {

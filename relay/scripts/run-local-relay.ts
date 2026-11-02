@@ -1,3 +1,4 @@
+import { parseKeepaliveMaxGraceMs } from "../src/keepalive-config.js";
 import { startLocalRelay } from "../src/local-relay.js";
 
 const port = Number(process.argv[2] ?? 8787);
@@ -6,7 +7,12 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
   process.exit(1);
 }
 
-const relay = startLocalRelay({ port });
+if (process.argv.length > 3) {
+  console.error(`invalid relay option: ${process.argv[3]}`);
+  process.exit(1);
+}
+
+const relay = startLocalRelay({ port, maxGraceMs: parseKeepaliveMaxGraceMs(process.env) });
 let shuttingDown = false;
 
 relay.once("listening", () => {
