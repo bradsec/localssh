@@ -124,11 +124,7 @@ export function attachTouchTextLayer(term: Terminal): TouchTextLayer | null {
     syncVisibleRows(source, mirror);
   };
   const onSelectionChange = () => {
-    const selected = hasSelectionIn(mirror);
-    // iOS shows no handles or Copy callout for a selection outside the focused
-    // field while the keyboard is up, so a selection here closes the keyboard.
-    if (selected && document.activeElement === term.textarea) term.blur();
-    if (stale && !selected) sync();
+    if (stale && !hasSelectionIn(mirror)) sync();
   };
 
   sync();
