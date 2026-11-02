@@ -32,6 +32,10 @@ it("serves the page and WASM with security headers, and keeps /relay for WebSock
     const page = await fetch(base);
     expect(await page.text()).toContain("localssh");
     expect(page.headers.get("content-security-policy")).toContain("'wasm-unsafe-eval'");
+    // A relay on another origin serves /capabilities over HTTP(S) beside its WebSocket.
+    expect(page.headers.get("content-security-policy")).toContain(
+      "connect-src 'self' ws: wss: http: https:;",
+    );
     expect(page.headers.get("x-frame-options")).toBe("DENY");
     expect((await fetch(`${base}/engine.wasm`)).headers.get("content-type")).toBe(
       "application/wasm",
