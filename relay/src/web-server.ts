@@ -17,8 +17,10 @@ const contentTypes: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
+// connect-src matches any WebSocket host because the relay URL is set at
+// build time; http: and https: let the page read that relay's /capabilities.
 const policy =
-  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss: http: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 
 export function createWebHandler(root: string, options: { capabilities?: CapabilityPolicy } = {}) {
   const base = resolve(root);
