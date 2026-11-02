@@ -517,3 +517,37 @@ for (const [width, visibleKeys] of [
     await expect(panel).toHaveCount(0);
   });
 }
+
+test("portrait header and Open terminals rows leave room around Connected", async ({ page }) => {
+  const address = process.env.E2E_SSHD_ADDR!;
+  const separator = address.lastIndexOf(":");
+  await page.goto("/");
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, separator));
+  await page.getByLabel(/^Port$/i).fill(address.slice(separator + 1));
+  await page.getByLabel(/^Username$/i).fill("tester");
+  await page.getByLabel(/^Password$/i).fill("s3cret");
+  await page.getByRole("button", { name: /^Connect to server$/i }).tap();
+  await page.getByRole("button", { name: /trust and connect/i }).tap();
+
+  const target = page.getByRole("button", { name: "Open terminals" });
+  await expect(target).toContainText("Connected");
+  const header = await target.evaluate((button) => {
+    const status = button.querySelector(".connection-status")!.getBoundingClientRect();
+    const host = button.querySelector(".active-target")!.getBoundingClientRect();
+    return { gap: host.top - status.bottom };
+  });
+  expect(header.gap).toBeGreaterThanOrEqual(4);
+
+  await target.tap();
+  const row = page.locator(".terminal-tabs--switcher .terminal-tabs__item").first();
+  await expect(row).toBeVisible();
+  const spacing = await row.evaluate((item) => {
+    const box = item.getBoundingClientRect();
+    const tab = item.querySelector('[role="tab"]')!.getBoundingClientRect();
+    const host = item.querySelector(".terminal-tabs__host")!.getBoundingClientRect();
+    const state = item.querySelector(".terminal-tabs__phone-state")!.getBoundingClientRect();
+    return { top: host.top - tab.top, bottom: box.bottom - state.bottom };
+  });
+  expect(spacing.top).toBeGreaterThanOrEqual(8);
+  expect(spacing.bottom).toBeGreaterThanOrEqual(8);
+});
