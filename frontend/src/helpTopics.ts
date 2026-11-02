@@ -60,7 +60,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "Select New terminal to connect to another server without closing your open shells. On a phone, select the target to open Open terminals and switch shells; on desktop, select a tab. Close disconnects only that shell. Each terminal keeps its own output and size. With background keep-alive enabled, leaving the page holds the session for the chosen time; Off closes it when the connection drops.",
       "If another connection needs a host-key check, select Return to open terminal to keep working. Select the connecting tab to return to the check.",
       "On a touch screen, the key bar shows the keys that fit. More keys opens the rest and replaces the on-screen keyboard until closed. Tap Ctrl or Alt once for the next key, twice to lock it, and a third time to turn it off. Use Text smaller and Text larger to change font size; use Settings, Key bar to reorder, add, remove, or reset keys.",
-      "On touch screens, drag with one finger to scroll output. Long press or select Select text to open a read-only view with native text selection. Use the visible keys for Tab, Esc, and command history.",
+      "On touch screens, drag with one finger to scroll output. Touch and hold text to select it with the native handles and Copy; touch and hold empty space for the native Paste. Select text in the Actions menu opens a read-only view of all saved output, including scrollback. Use the visible keys for Tab, Esc, and command history.",
       "Use Settings to change font, size, line height, or color scheme. Saved hosts can use This host settings while the vault is unlocked; otherwise the all-hosts settings apply. In short phone landscape with the keyboard open, the target and key bar share a row at the top.",
     ],
   },
@@ -102,8 +102,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     label: "Copy and paste",
     heading: "Copy and paste",
     paragraphs: [
-      "On a touch screen, long press or select Select text to open a read-only view with native selection handles. Select the text and use the device Copy action. Clipboard can copy a live terminal selection; if the browser blocks copying, select the text shown in the menu and use the device Copy action.",
-      "To paste, open Clipboard and use Paste from clipboard. If browser access is blocked, paste into the box and select Paste text. On desktop, you can also select terminal text and use your browser's copy and paste shortcuts.",
+      "On a touch screen, touch and hold text in the terminal to select it, drag the handles, and use the device Copy action. For output beyond the screen, choose Select text in the Actions menu to open a read-only view with the same handles. Clipboard can copy a live terminal selection; if the browser blocks copying, select the text shown in the menu and use the device Copy action.",
+      "To paste, touch and hold empty space in the terminal and choose Paste, which works over plain HTTP. Or open Clipboard and use Paste from clipboard. If browser access is blocked, paste into the box and select Paste text. On desktop, you can also select terminal text and use your browser's copy and paste shortcuts.",
     ],
   },
   {

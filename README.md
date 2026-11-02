@@ -595,15 +595,19 @@ Keyboard and More keys stay fixed. The order is saved on this device.
 
 On a phone, drag vertically with one finger to scroll terminal output. A
 horizontal drag or prompt flick sends no shell key; use the visible key bar.
-Long press or select **Select text** to open a read-only view with native text
-selection. It also works after a session closes. Desktop and tablet terminal
+Touch and hold terminal text to select it with the native handles and Copy
+callout; touch and hold empty space for the native Paste callout. **Select
+text** in the Actions menu opens a read-only view with native text selection
+for scrollback beyond the screen. It also works after a session closes. Desktop and tablet terminal
 gestures remain unchanged.
 
 ### Clipboard
 
-On touch screens, long press or select **Select text** to open a read-only view
-with native selection handles. Select text there and use the device's Copy
-action. A **Clipboard** menu sits in the session toolbar (under **Actions**
+On touch screens, touch and hold terminal text to select it with the native
+handles and use the device's Copy action; touch and hold empty space for the
+native Paste callout, which works over plain HTTP. For scrollback beyond the
+screen, **Select text** in the Actions menu opens a read-only view with native
+selection handles. A **Clipboard** menu sits in the session toolbar (under **Actions**
 below 1024px wide) for copying a live terminal selection and pasting without a
 hardware keyboard:
 

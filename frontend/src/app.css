@@ -562,14 +562,6 @@ body:has(.app-shell--connect) {
   overflow: hidden;
 }
 
-.terminal-select-button {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-3);
-  z-index: 1;
-  min-height: 44px;
-}
-
 .terminal-text-view {
   position: absolute;
   inset: 0;
@@ -597,9 +589,8 @@ body:has(.app-shell--connect) {
   -webkit-touch-callout: default;
 }
 
-/* Terminal.tsx owns touch movement so a long press can open the text view
-   without Safari cancelling the pointer stream as a page pan. It
-   preserves one- and two-finger scrollback itself and keeps pinch zoom from
+/* Terminal.tsx owns touch movement so Safari does not cancel the pointer
+   stream as a page pan. It preserves one- and two-finger scrollback itself and keeps pinch zoom from
    hiding the prompt; font size belongs to Settings. */
 .terminal-host {
   width: 100%;
@@ -610,6 +601,75 @@ body:has(.app-shell--connect) {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* Touch devices: Terminal.tsx puts an invisible, selectable copy of the visible
+   rows over the screen and widens xterm's input field along the cursor row. A
+   long press on text selects it with the browser's own handles and Copy
+   callout; a press on the prompt line after the cursor reaches the field and
+   offers Paste. The copy has xterm's own row class, so it shares the live
+   rows' font and row height. */
+/* The layers below stack inside the terminal, so panels drawn over it (Files,
+   menus) stay above them and keep receiving taps. */
+.terminal-host--touch {
+  isolation: isolate;
+}
+
+.terminal-host--touch .xterm-helpers {
+  inset: 0;
+  z-index: 1 !important;
+  pointer-events: none;
+}
+
+/* xterm places the field on the cursor cell (inline left, top, height). It is
+   widened only to the right edge of that row: a focused field that covered the
+   whole screen would take every long press for its own caret, so text above
+   could not be selected while the keyboard is up. */
+.terminal-host--touch .xterm-helper-textarea {
+  right: 0 !important;
+  width: auto !important;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.terminal-host--touch .terminal-touch-text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  font-kerning: none;
+  white-space: pre;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Only the browser's selection highlight shows; the live rows stay visible beneath. */
+.terminal-host--touch .terminal-touch-text,
+.terminal-host--touch .terminal-touch-text * {
+  color: transparent !important;
+  background: transparent !important;
+  text-decoration: none !important;
+  animation: none !important;
+}
+
+.terminal-touch-text span {
+  display: inline-block;
+  height: 100%;
+  vertical-align: top;
+}
+
+.terminal-touch-text .xterm-bold {
+  font-weight: bold;
+}
+
+/* A row ends with its text, so the space after the prompt reaches the field.
+   The inline width xterm gives a row would otherwise cover the whole line. */
+.terminal-host--touch .terminal-touch-text > div {
+  width: fit-content !important;
 }
 
 /* xterm's invisible accessibility rows stay outside the selectable text view. */

@@ -451,6 +451,7 @@ for (const cause of ["network", "background"] as const) {
       expect(box.x + box.width).toBeLessThanOrEqual(390);
     }
 
+    await page.getByRole("button", { name: "Actions" }).tap();
     await page.getByRole("button", { name: "Select text" }).tap();
     await expect(page.getByRole("dialog", { name: "Select text" })).toContainText("before-close");
   });

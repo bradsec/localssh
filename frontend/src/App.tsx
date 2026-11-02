@@ -6,6 +6,7 @@ import {
   LucideProvider,
   Plus,
   Settings,
+  TextSelect,
   Unplug,
   X,
 } from "lucide-react";
@@ -876,6 +877,19 @@ function AppContent() {
           }}
         />
       )}
+      {activeTab && touchPointer && !textView && (
+        <button
+          className="toolbar-button"
+          type="button"
+          onClick={() => {
+            openTextView(activeTab.id);
+            afterAction();
+          }}
+        >
+          <TextSelect />
+          <span>Select text</span>
+        </button>
+      )}
       <button
         className="toolbar-button"
         type="button"
@@ -1159,7 +1173,6 @@ function AppContent() {
                     onSelectionChange={(selected) => {
                       if (activeIdRef.current === tab.id) setTerminalHasSelection(selected);
                     }}
-                    onSelectText={() => openTextView(tab.id)}
                     onResize={(cols, rows) => {
                       tab.size = { cols, rows };
                       tab.handle?.resize(cols, rows);
@@ -1175,15 +1188,6 @@ function AppContent() {
                     active={activeId === tab.id && !!tab.handle && textView?.tabId !== tab.id}
                     phoneScreen={phoneScreen}
                   />
-                  {touchPointer && activeId === tab.id && !textView && (
-                    <button
-                      className="terminal-select-button"
-                      type="button"
-                      onClick={() => openTextView(tab.id)}
-                    >
-                      Select text
-                    </button>
-                  )}
                   {textView?.tabId === tab.id && (
                     <div className="terminal-text-view" role="dialog" aria-label="Select text">
                       <button type="button" onClick={closeTextView} aria-label="Close text view">

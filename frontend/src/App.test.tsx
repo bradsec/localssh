@@ -52,7 +52,6 @@ vi.mock("./components/Terminal.js", () => ({
     onInput,
     onFocusChange,
     onSelectionChange,
-    onSelectText,
     active,
     fontSize,
     fontFamily,
@@ -73,7 +72,6 @@ vi.mock("./components/Terminal.js", () => ({
     onInput?: (data: string) => void;
     onFocusChange?: (focused: boolean) => void;
     onSelectionChange?: (hasSelection: boolean) => void;
-    onSelectText?: () => void;
     active: boolean;
     fontSize: number;
     fontFamily: string;
@@ -106,7 +104,6 @@ vi.mock("./components/Terminal.js", () => ({
         data-font-family={fontFamily}
         data-line-height={lineHeight}
         data-background={theme.background}
-        onClick={onSelectText}
       />
     );
   },
@@ -619,17 +616,21 @@ describe("App", () => {
     expect(terminalActive).toBe(true);
   });
 
-  it("opens from a long press and clears the view when its tab closes", async () => {
+  it("clears the view when its tab closes; a terminal tap does not open it", async () => {
     vi.mocked(engine.connectSession).mockResolvedValue({
       write: vi.fn(),
       resize: vi.fn(),
       close: vi.fn(),
     });
+    usePointer("coarse");
     render(<App />);
     const user = userEvent.setup();
     await connect(user, "first.example");
 
+    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("SSH terminal emulator"));
+    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Select text" }));
     expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
     await user.click(screen.getByRole("button", { name: "Close first.example terminal" }));
     expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
@@ -668,7 +669,9 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/start them in tmux or screen/)).toBeInTheDocument();
     expect(screen.queryByRole("toolbar", { name: "Terminal keys" })).not.toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole("button", { name: "Select text" }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Select text" }));
     expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
   });
 
