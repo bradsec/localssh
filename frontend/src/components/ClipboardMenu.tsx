@@ -66,7 +66,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
   const copySelection = async () => {
     const text = getSelection();
     if (!text) {
-      setStatus("No terminal text is selected. Select text, then try Copy selection.");
+      setStatus("No terminal text is selected. Select terminal text, then try Copy selection.");
       return;
     }
     const ok = await writeClipboardText(text);
@@ -166,7 +166,7 @@ export function ClipboardMenu({ hasSelection, getSelection, onPaste }: Clipboard
             rows={2}
             autoComplete="off"
             autoCorrect="off"
-            autoCapitalize="off"
+            autoCapitalize="none"
             spellCheck={false}
             onPaste={(event) => {
               const text = event.clipboardData.getData("text");

@@ -180,6 +180,9 @@ export function ConnectDialog({
               value={host}
               onChange={(event) => setHost(event.target.value)}
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               inputMode="url"
               placeholder="server.example.com"
               required
@@ -193,6 +196,9 @@ export function ConnectDialog({
               max={65535}
               value={port}
               onChange={(event) => setPort(event.target.value)}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               inputMode="numeric"
               required
             />
@@ -204,6 +210,9 @@ export function ConnectDialog({
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
             />
           </label>
@@ -237,6 +246,9 @@ export function ConnectDialog({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 required
               />
             </label>
@@ -263,6 +275,8 @@ export function ConnectDialog({
                   value={pastedKey}
                   onChange={(event) => setPastedKey(event.target.value)}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   spellCheck={false}
                 />
               </label>
@@ -273,6 +287,9 @@ export function ConnectDialog({
                   value={passphrase}
                   onChange={(event) => setPassphrase(event.target.value)}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </label>
               {keyError && <p role="alert">{keyError}</p>}

@@ -98,6 +98,9 @@ function SetupForm({ vault }: { vault: VaultApi }) {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           autoComplete="new-password"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
         />
       </label>
@@ -109,6 +112,9 @@ function SetupForm({ vault }: { vault: VaultApi }) {
           value={confirmation}
           onChange={(event) => setConfirmation(event.target.value)}
           autoComplete="new-password"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
         />
       </label>
@@ -150,6 +156,9 @@ function UnlockForm({ vault }: { vault: VaultApi }) {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="current-password"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             required
           />
         </label>
@@ -433,6 +442,9 @@ function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
           value={current}
           onChange={(event) => setCurrent(event.target.value)}
           autoComplete="current-password"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
         />
       </label>
@@ -443,6 +455,9 @@ function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
           value={next}
           onChange={(event) => setNext(event.target.value)}
           autoComplete="new-password"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
         />
       </label>
@@ -454,6 +469,9 @@ function ChangeMasterPassword({ vault }: { vault: VaultApi }) {
           value={confirmation}
           onChange={(event) => setConfirmation(event.target.value)}
           autoComplete="new-password"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
         />
       </label>

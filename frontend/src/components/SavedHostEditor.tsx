@@ -105,6 +105,9 @@ export function SavedHostEditor({ entry, initial, busy, onSave, onCancel }: Save
           onChange={(event) => setHost(event.target.value)}
           autoComplete="off"
           inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           placeholder="server.example.com"
           required
         />
@@ -119,6 +122,9 @@ export function SavedHostEditor({ entry, initial, busy, onSave, onCancel }: Save
           value={port}
           onChange={(event) => setPort(event.target.value)}
           inputMode="numeric"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
         />
       </label>
@@ -154,6 +160,9 @@ export function SavedHostEditor({ entry, initial, busy, onSave, onCancel }: Save
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             required
           />
         </label>
@@ -167,6 +176,9 @@ export function SavedHostEditor({ entry, initial, busy, onSave, onCancel }: Save
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             required={!hadPassword}
           />
           {hadPassword && <small>Leave blank to keep the saved password.</small>}
