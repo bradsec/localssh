@@ -35,13 +35,12 @@ const terminalBlur = vi.fn();
 let terminalActive = false;
 // Handles the real terminal hands out, so a test can type into the session and
 // report the focus a phone's keyboard follows.
-let terminalInput: ((data: string) => void) | undefined;
+let terminalInput: ((data: string, raw?: boolean) => void) | undefined;
 let terminalFocusChange: ((focused: boolean) => void) | undefined;
 let terminalSelectionChange: ((hasSelection: boolean) => void) | undefined;
 const terminalPaste = vi.fn();
 const terminalWrites: ReturnType<typeof vi.fn>[] = [];
 let terminalSelectionText = "";
-let terminalSnapshotText = "first output";
 let deferTerminalReady = false;
 let completeTerminalReady: (() => void) | undefined;
 
@@ -66,10 +65,10 @@ vi.mock("./components/Terminal.js", () => ({
       blur: () => void;
       applicationCursorMode: () => boolean;
       getSelection: () => string;
-      snapshotText: () => string;
       paste: (text: string) => void;
+      noteSentInput: (data: string) => void;
     }) => void;
-    onInput?: (data: string) => void;
+    onInput?: (data: string, raw?: boolean) => void;
     onFocusChange?: (focused: boolean) => void;
     onSelectionChange?: (hasSelection: boolean) => void;
     active: boolean;
@@ -92,8 +91,8 @@ vi.mock("./components/Terminal.js", () => ({
       blur: terminalBlur,
       applicationCursorMode: () => false,
       getSelection: () => terminalSelectionText,
-      snapshotText: () => terminalSnapshotText,
       paste: terminalPaste,
+      noteSentInput: () => {},
     };
     if (deferTerminalReady) completeTerminalReady = () => onReady?.(controls);
     else onReady?.(controls);
@@ -250,7 +249,6 @@ describe("App", () => {
     terminalPaste.mockClear();
     terminalWrites.length = 0;
     terminalSelectionText = "";
-    terminalSnapshotText = "first output";
     deferTerminalReady = false;
     completeTerminalReady = undefined;
     usePointer("fine");
@@ -589,69 +587,19 @@ describe("App", () => {
     expect(screen.queryByRole("tablist", { name: "Open terminals" })).not.toBeInTheDocument();
   });
 
-  it("opens a frozen selectable view from the visible control and blocks terminal input", async () => {
-    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
-    vi.mocked(engine.connectSession).mockResolvedValue(handle);
+  it("has no Select text action on touch", async () => {
     usePointer("coarse");
-    render(<App />);
-    const user = userEvent.setup();
-    await connect(user, "first.example");
-
-    await user.click(screen.getByRole("button", { name: "Select text" }));
-    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
-    expect(terminalBlur).toHaveBeenCalled();
-    expect(terminalActive).toBe(false);
-
-    terminalSnapshotText = "later output";
-    act(() => terminalInput?.("unsafe"));
-    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onData(new Uint8Array([65])));
-    expect(sentBytes(handle)).toBe("");
-    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
-    expect(screen.getByRole("dialog", { name: "Select text" })).not.toHaveTextContent(
-      "later output",
-    );
-
-    await user.click(screen.getByRole("button", { name: "Close text view" }));
-    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
-    expect(terminalActive).toBe(true);
-  });
-
-  it("clears the view when its tab closes; a terminal tap does not open it", async () => {
     vi.mocked(engine.connectSession).mockResolvedValue({
       write: vi.fn(),
       resize: vi.fn(),
       close: vi.fn(),
     });
-    usePointer("coarse");
-    render(<App />);
-    const user = userEvent.setup();
-    await connect(user, "first.example");
-
-    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
-    await user.click(screen.getByLabelText("SSH terminal emulator"));
-    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Select text" }));
-    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
-    await user.click(screen.getByRole("button", { name: "Close first.example terminal" }));
-    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
-  });
-
-  it("clears the text view when the SSH connection closes", async () => {
-    vi.mocked(engine.connectSession).mockResolvedValue({
-      write: vi.fn(),
-      resize: vi.fn(),
-      close: vi.fn(),
-    });
-    usePointer("coarse");
     render(<App />);
     await connect(userEvent.setup(), "first.example");
-    await userEvent.setup().click(screen.getByRole("button", { name: "Select text" }));
-
-    act(() => vi.mocked(engine.connectSession).mock.calls[0]![0].onClose("connection lost"));
-    expect(screen.queryByRole("dialog", { name: "Select text" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select text" })).not.toBeInTheDocument();
   });
 
-  it("shows recovery after background loss and lets a closed tab select text", async () => {
+  it("shows recovery after background loss", async () => {
     useTouchPhone();
     vi.mocked(engine.connectSession).mockResolvedValue({
       write: vi.fn(),
@@ -669,10 +617,6 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/start them in tmux or screen/)).toBeInTheDocument();
     expect(screen.queryByRole("toolbar", { name: "Terminal keys" })).not.toBeInTheDocument();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Actions" }));
-    await user.click(screen.getByRole("button", { name: "Select text" }));
-    expect(screen.getByRole("dialog", { name: "Select text" })).toHaveTextContent("first output");
   });
 
   it("shows network recovery without the background hint and keeps focus on return", async () => {
@@ -1889,6 +1833,24 @@ describe("App", () => {
     act(() => terminalInput?.("r"));
 
     expect(sentBytes(handle)).toBe("\x12r");
+  });
+
+  // A touch selection edit replays arrows and DEL; an armed Alt must not turn
+  // that run into ESC-prefixed keys, and stays armed for the next typed key.
+  it("sends terminal-generated edit bytes past an armed modifier", async () => {
+    usePointer("coarse");
+    const handle: engine.SshHandle = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    vi.mocked(engine.connectSession).mockResolvedValueOnce(handle);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await connect(user, "10.0.0.25");
+
+    await user.click(screen.getByRole("button", { name: /^alt$/i }));
+    act(() => terminalInput?.("\x1b[D\x7f", true));
+    act(() => terminalInput?.("b"));
+
+    expect(sentBytes(handle)).toBe("\x1b[D\x7f\x1bb");
   });
 
   it("holds ctrl down until it is tapped off once it is locked", async () => {

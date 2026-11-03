@@ -6,7 +6,6 @@ import {
   LucideProvider,
   Plus,
   Settings,
-  TextSelect,
   Unplug,
   X,
 } from "lucide-react";
@@ -189,8 +188,6 @@ function AppContent() {
   const keyboardBeforePanelRef = useRef(false);
   const [terminalHasSelection, setTerminalHasSelection] = useState(false);
   const [sessionAnnouncement, setSessionAnnouncement] = useState("");
-  const [textView, setTextView] = useState<{ tabId: number; text: string } | null>(null);
-  const textViewRef = useRef<number | null>(null);
   const [modifiers, setModifiers] = useState<ModifierState>(NO_MODIFIERS);
   const connectionAttemptRef = useRef(0);
   // The closed tab a prefilled connect form will replace in place (S-17).
@@ -238,8 +235,6 @@ function AppContent() {
     setSwitcherOpen(false);
     if (tabsRef.current.find((tab) => tab.id === id)?.connecting) id = null;
     if (id !== null) setPendingReconnect(null);
-    textViewRef.current = null;
-    setTextView(null);
     currentTab()?.controls?.blur();
     activeIdRef.current = id;
     pendingFocusRef.current = focusTerminal ? id : null;
@@ -313,18 +308,26 @@ function AppContent() {
     };
   }, []);
 
-  /** Sends input to the session, applying whichever modifiers are armed. */
+  /**
+   * Sends input to the session, applying whichever modifiers are armed. `raw`
+   * bytes (a touch selection edit the terminal generated) skip the modifiers
+   * and leave them armed.
+   */
   const sendInput = useCallback(
-    (data: string) => {
-      if (textViewRef.current !== null || currentTab()?.transport === "resuming") return;
-      const { data: outgoing, next } = applyModifiers(data, modifiersRef.current);
-      updateModifiers(next);
+    (data: string, raw = false) => {
+      if (currentTab()?.transport === "resuming") return;
+      let outgoing = data;
+      if (!raw) {
+        const applied = applyModifiers(data, modifiersRef.current);
+        outgoing = applied.data;
+        updateModifiers(applied.next);
+      }
       const tab = currentTab();
       const error = tab?.handle?.write(ENCODER.encode(outgoing));
       if (error) {
         if (tab) tab.inputError = `Input was not sent: ${error}`;
         setTabs([...tabsRef.current]);
-      }
+      } else if (tab?.handle) tab.controls?.noteSentInput(outgoing);
     },
     [updateModifiers],
   );
@@ -520,10 +523,6 @@ function AppContent() {
           tab.lostWhileHidden =
             tab.lostWhileHidden || pageHiddenRef.current || document.visibilityState === "hidden";
           tab.transport = undefined;
-          if (textViewRef.current === tab.id) {
-            textViewRef.current = null;
-            setTextView(null);
-          }
           toast(
             reason ? `Session lost: ${tab.host}. ${reason}` : `Session ended: ${tab.host}.`,
             reason ? "error" : "info",
@@ -731,24 +730,9 @@ function AppContent() {
   const terminalTheme =
     TERMINAL_THEMES[terminalSettings.themeName] ?? TERMINAL_THEMES[DEFAULT_THEME_NAME] ?? {};
 
-  const openTextView = (id: number) => {
-    if (activeIdRef.current !== id) return;
-    const controls = tabsRef.current.find((tab) => tab.id === id)?.controls;
-    if (!controls) return;
-    controls.blur();
-    textViewRef.current = id;
-    setTextView({ tabId: id, text: controls.snapshotText() });
-  };
-
-  const closeTextView = () => {
-    textViewRef.current = null;
-    setTextView(null);
-  };
-
   const closeTab = (id: number) => {
     const tab = tabsRef.current.find((entry) => entry.id === id);
     if (!tab) return;
-    if (textViewRef.current === id) closeTextView();
     if (pendingReconnectRef.current === id) setPendingReconnect(null);
     if (
       status.kind === "unknown-host" &&
@@ -872,23 +856,8 @@ function AppContent() {
         <ClipboardMenu
           hasSelection={terminalHasSelection}
           getSelection={() => currentTab()?.controls?.getSelection() ?? ""}
-          onPaste={(text) => {
-            if (textViewRef.current === null) currentTab()?.controls?.paste(text);
-          }}
+          onPaste={(text) => currentTab()?.controls?.paste(text)}
         />
-      )}
-      {activeTab && touchPointer && !textView && (
-        <button
-          className="toolbar-button"
-          type="button"
-          onClick={() => {
-            openTextView(activeTab.id);
-            afterAction();
-          }}
-        >
-          <TextSelect />
-          <span>Select text</span>
-        </button>
       )}
       <button
         className="toolbar-button"
@@ -912,7 +881,7 @@ function AppContent() {
     </>
   );
 
-  const keyBar = activeTab?.handle && touchPointer && !textView && (
+  const keyBar = activeTab?.handle && touchPointer && (
     <KeyBar
       disabled={activeTab.transport === "resuming"}
       keys={keyBarKeys}
@@ -1164,8 +1133,8 @@ function AppContent() {
                       tab.pendingData = [];
                       focusPendingTerminal(tab.id);
                     }}
-                    onInput={(data) => {
-                      if (activeIdRef.current === tab.id) sendInput(data);
+                    onInput={(data, raw) => {
+                      if (activeIdRef.current === tab.id) sendInput(data, raw);
                     }}
                     onFocusChange={(focused) => {
                       if (activeIdRef.current === tab.id) setTerminalFocused(focused);
@@ -1185,17 +1154,9 @@ function AppContent() {
                       TERMINAL_THEMES[DEFAULT_THEME_NAME] ??
                       {}
                     }
-                    active={activeId === tab.id && !!tab.handle && textView?.tabId !== tab.id}
+                    active={activeId === tab.id && !!tab.handle}
                     phoneScreen={phoneScreen}
                   />
-                  {textView?.tabId === tab.id && (
-                    <div className="terminal-text-view" role="dialog" aria-label="Select text">
-                      <button type="button" onClick={closeTextView} aria-label="Close text view">
-                        Close
-                      </button>
-                      <pre>{textView.text}</pre>
-                    </div>
-                  )}
                 </div>
                 {fileTabs.has(tab.id) && tab.handle && (
                   <FilePanel
@@ -1232,7 +1193,6 @@ function AppContent() {
           be recalled and run from the bar alone. */}
           {activeTab &&
             touchPointer &&
-            !textView &&
             (activeTab.handle ? (
               !combinedRow && keyBar
             ) : (

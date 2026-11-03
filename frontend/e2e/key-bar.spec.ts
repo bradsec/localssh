@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // A phone, where the terminal keys the bar supplies are the only ones there are.
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -125,7 +125,7 @@ test("supplies terminal keys for the whole session, keyboard or not", async ({ p
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 
   const keyBar = page.getByRole("toolbar", { name: /terminal keys/i });
-  const terminalInput = page.locator(".xterm-helper-textarea");
+  const terminalInput = page.locator(".terminal-touch-text");
 
   await expect(keyBar).toBeVisible();
 
@@ -199,7 +199,7 @@ test("sends Shift Tab as ESC [ Z and stops Text larger at 32", async ({ page }) 
   // is seen by its effect: Tab jumps the cursor to column 8, Shift Tab returns
   // it to column 0, and the next letter overwrites the first one typed.
   await page.locator(".xterm-screen").tap();
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+  await expect(page.locator(".terminal-touch-text")).toBeFocused();
   await page.keyboard.type("ab");
   await page.getByRole("button", { name: /^tab$/i }).tap();
   await page.getByRole("button", { name: /^shift tab$/i }).tap();
@@ -259,15 +259,35 @@ for (const width of [320, 390]) {
   });
 }
 
-test("phone drags send no hidden shell keys", async ({ page }) => {
+/**
+ * Counts writes of terminal input to the SSH session. Counting WebSocket frames
+ * instead also counts the transport's handshake tail and flow-control acks,
+ * which keep arriving after the terminal shows.
+ */
+async function countSessionInput(page: Page) {
   await page.addInitScript(() => {
-    const original = WebSocket.prototype.send;
-    (window as Window & { sentFrames: number }).sentFrames = 0;
-    WebSocket.prototype.send = function (data) {
-      (window as Window & { sentFrames: number }).sentFrames++;
-      return original.call(this, data);
-    };
+    (window as Window & { inputWrites: number }).inputWrites = 0;
+    let connector: typeof window.sshConnect;
+    Object.defineProperty(window, "sshConnect", {
+      configurable: true,
+      get: () => connector,
+      set(value: typeof window.sshConnect) {
+        connector = async (...args) => {
+          const session = await value(...args);
+          const write = session.write.bind(session);
+          session.write = (chunk) => {
+            (window as Window & { inputWrites: number }).inputWrites++;
+            return write(chunk);
+          };
+          return session;
+        };
+      },
+    });
   });
+}
+
+test("phone drags send no hidden shell keys", async ({ page }) => {
+  await countSessionInput(page);
   const address = process.env.E2E_SSHD_ADDR!;
   const separator = address.lastIndexOf(":");
   await page.goto("/");
@@ -279,7 +299,9 @@ test("phone drags send no hidden shell keys", async ({ page }) => {
   await page.getByRole("button", { name: /trust and connect/i }).tap();
   await expect(page.getByRole("button", { name: "Open terminals" })).toBeVisible();
 
-  const before = await page.evaluate(() => (window as Window & { sentFrames: number }).sentFrames);
+  const before = await page.evaluate(
+    () => (window as Window & { inputWrites: number }).inputWrites,
+  );
   await page.locator(".xterm-screen").evaluate((screen) => {
     const box = screen.getBoundingClientRect();
     for (const [dx, dy] of [
@@ -307,20 +329,13 @@ test("phone drags send no hidden shell keys", async ({ page }) => {
       }
     }
   });
-  expect(await page.evaluate(() => (window as Window & { sentFrames: number }).sentFrames)).toBe(
+  expect(await page.evaluate(() => (window as Window & { inputWrites: number }).inputWrites)).toBe(
     before,
   );
 });
 
 test("swipes stay silent in phone landscape and after rotation to portrait", async ({ page }) => {
-  await page.addInitScript(() => {
-    const original = WebSocket.prototype.send;
-    (window as Window & { sentFrames: number }).sentFrames = 0;
-    WebSocket.prototype.send = function (data) {
-      (window as Window & { sentFrames: number }).sentFrames++;
-      return original.call(this, data);
-    };
-  });
+  await countSessionInput(page);
   await page.setViewportSize({ width: 844, height: 390 });
   const address = process.env.E2E_SSHD_ADDR!;
   const separator = address.lastIndexOf(":");
@@ -333,7 +348,7 @@ test("swipes stay silent in phone landscape and after rotation to portrait", asy
   await page.getByRole("button", { name: /trust and connect/i }).tap();
   await expect(page.locator(".xterm-screen")).toBeVisible();
   const landscapeBefore = await page.evaluate(
-    () => (window as Window & { sentFrames: number }).sentFrames,
+    () => (window as Window & { inputWrites: number }).inputWrites,
   );
   await page.locator(".xterm-screen").evaluate((screen) => {
     const box = screen.getBoundingClientRect();
@@ -355,7 +370,7 @@ test("swipes stay silent in phone landscape and after rotation to portrait", asy
       );
     }
   });
-  expect(await page.evaluate(() => (window as Window & { sentFrames: number }).sentFrames)).toBe(
+  expect(await page.evaluate(() => (window as Window & { inputWrites: number }).inputWrites)).toBe(
     landscapeBefore,
   );
   await page.setViewportSize({ width: 390, height: 844 });
@@ -363,7 +378,9 @@ test("swipes stay silent in phone landscape and after rotation to portrait", asy
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
 
-  const before = await page.evaluate(() => (window as Window & { sentFrames: number }).sentFrames);
+  const before = await page.evaluate(
+    () => (window as Window & { inputWrites: number }).inputWrites,
+  );
   await page.locator(".xterm-screen").evaluate((screen) => {
     const box = screen.getBoundingClientRect();
     const x = box.left + box.width / 2;
@@ -384,7 +401,7 @@ test("swipes stay silent in phone landscape and after rotation to portrait", asy
       );
     }
   });
-  expect(await page.evaluate(() => (window as Window & { sentFrames: number }).sentFrames)).toBe(
+  expect(await page.evaluate(() => (window as Window & { inputWrites: number }).inputWrites)).toBe(
     before,
   );
 });
@@ -452,8 +469,7 @@ for (const cause of ["network", "background"] as const) {
     }
 
     await page.getByRole("button", { name: "Actions" }).tap();
-    await page.getByRole("button", { name: "Select text" }).tap();
-    await expect(page.getByRole("dialog", { name: "Select text" })).toContainText("before-close");
+    await expect(page.getByRole("button", { name: "Select text" })).toHaveCount(0);
   });
 }
 
@@ -495,6 +511,9 @@ for (const [width, visibleKeys] of [
     await expect(panel).toBeVisible();
     await expect(more).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+    const backspace = panel.getByRole("button", { name: "Backspace" });
+    await expect(backspace).toHaveText("bksp");
+    expect((await backspace.boundingBox())!.width).toBeGreaterThanOrEqual(44);
 
     // A key in the panel sends, and the panel stays open.
     await panel

@@ -562,33 +562,6 @@ body:has(.app-shell--connect) {
   overflow: hidden;
 }
 
-.terminal-text-view {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-3);
-  background: var(--terminal-shell);
-  color: var(--text);
-}
-
-.terminal-text-view > button {
-  align-self: flex-end;
-  min-height: 44px;
-}
-
-.terminal-text-view > pre {
-  flex: 1;
-  overflow: auto;
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
-  -webkit-user-select: text;
-  -webkit-touch-callout: default;
-}
-
 /* Terminal.tsx owns touch movement so Safari does not cancel the pointer
    stream as a page pan. It preserves one- and two-finger scrollback itself and keeps pinch zoom from
    hiding the prompt; font size belongs to Settings. */
@@ -603,42 +576,11 @@ body:has(.app-shell--connect) {
   -webkit-touch-callout: none;
 }
 
-/* Touch devices: Terminal.tsx puts an invisible, selectable copy of the visible
-   rows over the screen and widens xterm's input field across the cursor row. A
-   long press on text selects it with the browser's own handles and Copy
-   callout; a long press on the prompt line reaches the field and offers Paste. The copy has xterm's own row class, so it shares the live
-   rows' font and row height. */
+/* Touch devices select and edit through one mirror of the visible xterm rows. */
 /* The layers below stack inside the terminal, so panels drawn over it (Files,
    menus) stay above them and keep receiving taps. */
 .terminal-host--touch {
   isolation: isolate;
-}
-
-.terminal-host--touch .xterm-helpers {
-  inset: 0;
-  z-index: 4 !important;
-  pointer-events: none;
-}
-
-/* xterm places the field on the cursor row (inline top and height). It spans
-   that whole row and sits above the text copy, so a long press on the prompt
-   line offers Paste instead of selecting the prompt. It covers no other row: a
-   focused field over the whole screen would take every long press for its own
-   caret. */
-/* Opaque, hidden by colour: iOS WebKit shows no caret, selection handles,
-   Copy, or Paste while the focused field has near-zero opacity
-   (https://bugs.webkit.org/show_bug.cgi?id=191442). */
-.terminal-host--touch .xterm-helper-textarea {
-  left: 0 !important;
-  width: 100% !important;
-  opacity: 1 !important;
-  color: transparent;
-  background: transparent;
-  caret-color: transparent;
-  pointer-events: auto;
-  -webkit-user-select: text;
-  user-select: text;
-  -webkit-touch-callout: default;
 }
 
 .terminal-host--touch .terminal-touch-text {
@@ -652,6 +594,19 @@ body:has(.app-shell--connect) {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  overflow: visible;
+  outline: none;
+}
+
+.terminal-host--touch .xterm-helper-textarea {
+  pointer-events: none;
+}
+
+.terminal-host--touch .terminal-touch-text ::selection {
+  background: rgba(130, 165, 240, 0.55) !important;
 }
 
 /* Only the browser's selection highlight shows; the live rows stay visible beneath. */
@@ -673,9 +628,9 @@ body:has(.app-shell--connect) {
   font-weight: bold;
 }
 
-/* A row ends with its text, so the space after the prompt reaches the field.
+/* A row ends with its text, so a tap past the end lands on the editing host.
    The inline width xterm gives a row would otherwise cover the whole line. */
-.terminal-host--touch .terminal-touch-text > div {
+.terminal-host--touch .terminal-touch-rows > div {
   width: fit-content !important;
 }
 
@@ -685,10 +640,8 @@ body:has(.app-shell--connect) {
   user-select: none;
 }
 
-/* The hidden textarea is where xterm receives keystrokes, so it is the element
-   iOS focuses. Safari zooms the whole page in when a focused field's text is
-   under 16px, which leaves the terminal half off-screen; the size is invisible
-   here because the textarea is transparent and one cell wide. */
+/* xterm's desktop input stays at least 16px to avoid mobile browser zoom if
+   the textarea gains focus outside the touch editing host. */
 .terminal-host .xterm-helper-textarea {
   font-size: 16px;
 }
