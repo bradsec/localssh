@@ -486,8 +486,8 @@ signing in. Choose a shorter time on a shared device.
 With keep-alive enabled and a relay that supports resume, leaving the page
 detaches the transport. On return, **Resuming** keeps the terminal output in
 view until the same SSH session returns. If it has ended, a recovery row shows
-the cause and offers **Reconnect** and **Close terminal**. **Select text**
-remains available for closed-session output. Reconnect uses credentials in one
+the cause and offers **Reconnect** and **Close terminal**. Scroll to older output
+before copying it. Reconnect uses credentials in one
 tap only when they are in the unlocked vault. Otherwise, the connect form opens
 with host, port, and user filled. New output follows a marker identifying the
 new connection. Reloading starts a new page and requires a new login. Use
@@ -540,6 +540,10 @@ connection names the likely cause and next step; its Technical details line
 keeps the engine's original message.
 
 ## Phones and tablets
+
+Login, key paste, passphrase, master password, saved host identifier, remote
+path, and file filter fields do not auto-capitalise or autocorrect on touch
+keyboards.
 
 The interface is built for a small touch screen as much as for a desktop
 browser. On a phone the terminal runs to the edges of the screen, and controls
@@ -602,20 +606,26 @@ Keyboard and More keys stay fixed. The order is saved on this device.
 
 On a phone, drag vertically with one finger to scroll terminal output. A
 horizontal drag or prompt flick sends no shell key; use the visible key bar.
-Touch and hold terminal text to select it with the native handles and Copy
-callout; touch and hold the prompt line for the native Paste callout. Text on
-the prompt line itself is not selectable. **Select
-text** in the Actions menu opens a read-only view with native text selection
-for scrollback beyond the screen. It also works after a session closes. Desktop and tablet terminal
+Double-tap or long press terminal text to select it, drag the native handles,
+then use Copy. Tap the prompt for Paste with the on-screen keyboard shown or
+hidden. Backspace, typing, or pasting over a selection edits text you typed or
+pasted on the current command line, including wrapped text. After Tab completion,
+history, or arrow keys on that line, use Backspace, Option+Backspace, or Ctrl+U.
+Selected output, a right prompt, or a completion listing is never deleted;
+typing or Enter over it drops the selection and goes to the prompt. Any
+paste clears the highlight. Scroll to older output before copying it. Android
+Chrome uses its native selection gestures and action bar. On iPad, hardware
+keyboard shell keys work while the terminal has focus. On a tablet, swipe right
+for Tab and left for Esc, flick up or down for history, and drag with two
+fingers to scroll; these stand down while text is selected. Desktop terminal
 gestures remain unchanged.
 
 ### Clipboard
 
-On touch screens, touch and hold terminal text to select it with the native
-handles and use the device's Copy action; touch and hold the prompt line for
-the native Paste callout, which works over plain HTTP. For scrollback beyond the
-screen, **Select text** in the Actions menu opens a read-only view with native
-selection handles. A **Clipboard** menu sits in the session toolbar (under **Actions**
+On touch screens, double-tap or long press terminal text, drag the native
+handles, and use the device's Copy action. Tap the prompt for Paste with the
+on-screen keyboard shown or hidden, including over plain HTTP. Scroll to older
+output before copying it. A **Clipboard** menu sits in the session toolbar (under **Actions**
 below 1024px wide) for copying a live terminal selection and pasting without a
 hardware keyboard:
 
