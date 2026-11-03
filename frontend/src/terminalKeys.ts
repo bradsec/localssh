@@ -51,7 +51,7 @@ export const KEY_BAR_KEYS: readonly TerminalKey[] = [
   { id: "enter", label: "⏎", ariaLabel: "Enter", sequence: "\r" },
   // DEL rather than BS: it is what a terminal's erase character is set to
   // almost everywhere, and what the Backspace key on a desktop sends.
-  { id: "backspace", label: "⌫", ariaLabel: "Backspace", sequence: "\x7f" },
+  { id: "backspace", label: "bksp", ariaLabel: "Backspace", sequence: "\x7f" },
   { id: "ctrl-c", label: "^C", ariaLabel: "Control C, interrupt", sequence: "\x03" },
   { id: "left", label: "←", ariaLabel: "Left arrow", cursor: "left" },
   { id: "right", label: "→", ariaLabel: "Right arrow", cursor: "right" },
@@ -134,7 +134,7 @@ export function keySequence(key: TerminalKey, applicationCursorKeys: boolean): s
   return key.sequence ?? "";
 }
 
-function cursorSequence(cursor: CursorKey, applicationCursorKeys: boolean): string {
+export function cursorSequence(cursor: CursorKey, applicationCursorKeys: boolean): string {
   const introducer = applicationCursorKeys ? "\x1bO" : "\x1b[";
   switch (cursor) {
     case "up":
