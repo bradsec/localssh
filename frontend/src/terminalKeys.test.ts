@@ -48,6 +48,12 @@ describe("keySequence", () => {
     expect(escape && keySequence(escape, false)).toBe("\x1b");
   });
 
+  it("labels Backspace clearly without changing its bytes or accessible name", () => {
+    const backspace = KEY_BAR_KEYS.find((key) => key.id === "backspace");
+    expect(backspace).toMatchObject({ label: "bksp", ariaLabel: "Backspace" });
+    expect(backspace && keySequence(backspace, false)).toBe("\x7f");
+  });
+
   // Full-screen programs such as vim and less switch cursor keys to the
   // application encoding, and the other one is ignored or echoed as text.
   it("encodes cursor keys for the terminal's current mode", () => {
