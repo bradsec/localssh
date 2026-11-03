@@ -53,7 +53,12 @@ describe("help topics", () => {
   it("explains mobile session recovery and current controls without stale guidance", () => {
     const topic = (id: string) =>
       HELP_TOPICS.find((entry) => entry.id === id)?.paragraphs.join(" ") ?? "";
-    expect(topic("terminal")).toContain("Select text");
+    expect(topic("terminal")).toContain("Double-tap or long press");
+    expect(topic("terminal")).toContain("swipe right for Tab");
+    expect(topic("terminal")).toContain("including wrapped text");
+    expect(topic("terminal")).toContain("After Tab completion, history, or arrow keys");
+    expect(topic("terminal")).toContain("Backspace, Option+Backspace, or Ctrl+U");
+    expect(topic("clipboard")).toContain("clears the highlight");
     expect(topic("terminal")).toContain("More keys");
     expect(topic("terminal")).toContain("Text larger");
     expect(topic("terminal")).toContain("This host");
@@ -62,7 +67,7 @@ describe("help topics", () => {
     expect(topic("background")).toContain("prefilled");
     expect(topic("files")).toContain("Resume download");
     expect(topic("files")).toContain("iOS closes the page");
-    expect(topic("clipboard")).toContain("read-only");
+    expect(topic("clipboard")).toContain("Scroll to older output");
     expect(topic("troubleshooting")).toContain("Resuming");
     expect(HELP_TOPICS.flatMap((entry) => entry.paragraphs).join(" ")).not.toMatch(
       /Appearance|Swipe right|Closing the page disconnects/,

@@ -18,6 +18,8 @@ OpenSSH Ed25519, ECDSA, and RSA keys, unencrypted PKCS#8 PEM, and legacy RSA
 or EC PEM keys are supported. OpenSSH and legacy PEM keys may use a passphrase.
 Encrypted PKCS#8 PEM is unsupported. A selected key and passphrase are used for
 that connection only and are not saved in the address book.
+Login, key passphrase, and key paste fields do not auto-capitalise or autocorrect.
+The same applies to master passwords and saved host identifiers.
 
 ## Saved hosts
 
@@ -47,7 +49,7 @@ the session when the connection drops. Open terminals keep their original time.
 
 On return, **Resuming** means localssh is restoring the same session. If it
 ends, the recovery row names the cause and offers **Reconnect** and **Close
-terminal**. **Select text** still opens its output. One-tap Reconnect uses
+terminal**. Scroll to older output before copying it. One-tap Reconnect uses
 credentials only when stored in an unlocked vault. Otherwise, the connect form
 opens with host, port, and user filled. A marker separates old output from the
 new connection. Reloading starts a new page and needs a new login. Use `tmux`
@@ -100,10 +102,21 @@ More keys opens the rest in place of the on-screen keyboard. Tap Ctrl or Alt
 once for the next key, twice to lock it, and a third time to turn it off. The
 bar includes Shift Tab and Text smaller/Text larger. **Settings**, **Edit key
 bar** lets you reorder, add, remove, or reset keys. Keyboard and More keys
-stay fixed. Drag vertically with one finger to scroll output; horizontal drags
-and prompt flicks send no shell keys. Touch and hold terminal text to select it with
-native handles and Copy; touch and hold the prompt line for the native Paste. **Select
-text** in the Actions menu opens a read-only view for scrollback beyond the screen.
+stay fixed. On a phone, drag vertically with one finger to scroll output;
+horizontal drags and prompt flicks send no shell keys. On a tablet, swipe right
+for Tab and left for Esc, flick up or down for history, and drag with two
+fingers to scroll; these stand down while text is selected. Double-tap or long
+press terminal text, drag the native handles, then use Copy. Tap the prompt for
+Paste with the on-screen keyboard shown or hidden. Backspace, typing, or pasting
+over a selection edits text you typed or pasted on the current command line,
+including wrapped text. After Tab completion, history, or arrow keys on that
+line, use Backspace, Option+Backspace, or Ctrl+U. Selected output, a right
+prompt, or a completion listing is never deleted; typing or Enter over it drops
+the selection and goes to the prompt. Any paste clears the
+highlight. Scroll to
+older output before copying it. Android Chrome uses its native selection
+gestures and action bar. The key bar backspace key is labelled `bksp`. On iPad,
+hardware keyboard shell keys work while the terminal has focus.
 
 Use **Settings** to change font, size, line height, and color scheme. Line
 height defaults to 1.15 and ranges from 1.00 to 2.00 in 0.05 steps. Changes
