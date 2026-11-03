@@ -1,19 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
-test.use({
-  viewport: { width: 390, height: 844 },
-  hasTouch: true,
-  isMobile: true,
-});
+test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
 async function connect(page: Page, touch = true) {
-  const sshdAddress = process.env.E2E_SSHD_ADDR;
-  expect(sshdAddress, "global setup must provide the SSH server address").toBeTruthy();
-
-  const separator = sshdAddress!.lastIndexOf(":");
+  const address = process.env.E2E_SSHD_ADDR!;
+  const split = address.lastIndexOf(":");
   await page.goto("/");
-  await page.getByLabel(/^Host$/i).fill(sshdAddress!.slice(0, separator));
-  await page.getByLabel(/^Port$/i).fill(sshdAddress!.slice(separator + 1));
+  await page.getByLabel(/^Host$/i).fill(address.slice(0, split));
+  await page.getByLabel(/^Port$/i).fill(address.slice(split + 1));
   await page.getByLabel(/^Username$/i).fill("tester");
   await page.getByLabel(/^Password$/i).fill("s3cret");
   const press = (name: RegExp) => {
@@ -25,48 +19,167 @@ async function connect(page: Page, touch = true) {
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 }
 
-test("Select text shows frozen DOM output and blocks shell input", async ({ page }) => {
-  await connect(page);
-  await page
-    .locator(".xterm-helper-textarea")
-    .evaluate((textarea: HTMLTextAreaElement) => textarea.focus());
-  await page.keyboard.type("selectme");
-  await expect(page.locator(".xterm-rows")).toContainText("selectme");
-
-  await page.getByRole("button", { name: "Actions" }).tap();
-  await page.getByRole("button", { name: "Select text" }).tap();
-  const view = page.getByRole("dialog", { name: "Select text" });
-  await expect(view.locator("pre")).toContainText("selectme");
-  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
-
-  const selected = await view.locator("pre").evaluate((pre) => {
-    const range = document.createRange();
-    range.selectNodeContents(pre);
-    const selection = window.getSelection()!;
-    selection.removeAllRanges();
-    selection.addRange(range);
-    return selection.toString();
-  });
-  expect(selected).toContain("selectme");
-
-  await page.keyboard.type("must-not-reach-shell");
-  await expect(view.locator("pre")).not.toContainText("must-not-reach-shell");
-  await page.getByRole("button", { name: "Close text view" }).tap();
-  await expect(view).toHaveCount(0);
-  await expect(page.locator(".xterm-rows")).not.toContainText("must-not-reach-shell");
-});
-
 async function typeInShell(page: Page, text: string) {
-  await page
-    .locator(".xterm-helper-textarea")
-    .evaluate((textarea: HTMLTextAreaElement) => textarea.focus());
+  await page.locator(".terminal-touch-text").focus();
   await page.keyboard.type(text);
 }
 
-/** Centre of the first occurrence of `text` inside the selectable copy of the rows. */
+test("terminal input has no visible focus decoration while buttons keep theirs", async ({
+  page,
+}) => {
+  await connect(page);
+  const input = page.locator(".terminal-touch-text");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveCSS("outline-style", "none");
+  await expect(input).toHaveCSS("box-shadow", "none");
+  await expect(input).toHaveCSS("opacity", "1");
+
+  const actions = page.getByRole("button", { name: "Actions" });
+  await actions.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(actions).toBeFocused();
+  await expect(actions).toHaveCSS("outline-style", "solid");
+  await expect(actions).toHaveCSS("outline-width", "3px");
+});
+
+test("the editable layer mirrors live rows and keeps xterm accessibility output", async ({
+  page,
+}) => {
+  await connect(page);
+  await typeInShell(page, "mirrored");
+  const mirror = page.locator(".terminal-touch-text");
+  await expect(mirror).toContainText("mirrored");
+  await expect(mirror).toHaveAttribute("contenteditable", "plaintext-only");
+  await expect(mirror).not.toHaveAttribute("aria-hidden", "true");
+  await expect(page.locator(".xterm-accessibility-tree")).toHaveCount(1);
+
+  const layout = await page.evaluate(() => {
+    const source = document.querySelector<HTMLElement>(".xterm-rows")!;
+    const copy = document.querySelector<HTMLElement>(".terminal-touch-rows")!;
+    const style = (element: Element) => {
+      const computed = getComputedStyle(element);
+      return [computed.fontFamily, computed.fontSize, computed.lineHeight].join("|");
+    };
+    return {
+      rows: [source.children.length, copy.children.length],
+      sameFont: style(source) === style(copy),
+      tops: Array.from(source.children, (row, i) => [
+        Math.round(row.getBoundingClientRect().top),
+        Math.round(copy.children[i]!.getBoundingClientRect().top),
+      ]),
+    };
+  });
+  expect(layout.rows[1]).toBe(layout.rows[0]);
+  expect(layout.sameFont).toBe(true);
+  for (const [source, copy] of layout.tops) expect(copy).toBe(source);
+});
+
+test("Actions has no Select text entry", async ({ page }) => {
+  await connect(page);
+  await page.getByRole("button", { name: "Actions" }).tap();
+  await expect(page.getByRole("button", { name: "Select text" })).toHaveCount(0);
+});
+
+test("a tap on terminal text focuses the editable host", async ({ page }) => {
+  await connect(page);
+  await typeInShell(page, "tapme");
+  const host = page.locator(".terminal-touch-text");
+  await expect(host).toContainText("tapme");
+  await host.evaluate((element: HTMLElement) => element.blur());
+  const point = await host.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  });
+  await page.touchscreen.tap(point.x, point.y);
+  await expect(host).toBeFocused();
+  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
+});
+
+test("a touch outside the mirror does not focus xterm's textarea", async ({ page }) => {
+  await connect(page);
+  const focused = await page.locator(".terminal-host").evaluate((host) => {
+    const mirror = host.querySelector<HTMLElement>(".terminal-touch-text")!;
+    mirror.blur();
+    host.setPointerCapture = () => {};
+    host.hasPointerCapture = () => false;
+    for (const type of ["pointerdown", "pointerup"]) {
+      host.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          pointerType: "touch",
+          pointerId: 9,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    }
+    return {
+      mirror: document.activeElement === mirror,
+      textarea: document.activeElement === host.querySelector(".xterm-helper-textarea"),
+    };
+  });
+  expect(focused).toEqual({ mirror: true, textarea: false });
+});
+
+test("a paste event sends text to the session once", async ({ page }) => {
+  await connect(page);
+  await page.locator(".terminal-touch-text").evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "plain-paste");
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(page.locator(".xterm-rows")).toContainText("plain-paste");
+  await page.waitForTimeout(300);
+  expect((await page.locator(".xterm-rows").textContent())?.match(/plain-paste/g)).toHaveLength(1);
+});
+
+test("a selection in the mirror keeps the editing host focused", async ({ page }) => {
+  await connect(page);
+  await typeInShell(page, "keepkeys");
+  const host = page.locator(".terminal-touch-text");
+  await host.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element.firstElementChild!);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(range);
+  });
+  await expect(host).toBeFocused();
+  expect(await page.evaluate(() => document.getSelection()?.toString().length)).toBeGreaterThan(0);
+});
+
+test("touches on the editing host keep browser gesture defaults", async ({ page }) => {
+  await connect(page);
+  const result = await page.locator(".terminal-touch-text").evaluate((element) => {
+    const down = new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 9,
+      pointerType: "touch",
+    });
+    element.dispatchEvent(down);
+    element.dispatchEvent(
+      new PointerEvent("pointercancel", {
+        bubbles: true,
+        pointerId: 9,
+        pointerType: "touch",
+      }),
+    );
+    return down.defaultPrevented;
+  });
+  expect(result).toBe(false);
+});
+
+/** Centre of the first occurrence of `text` inside the editable copy of the rows. */
 function centreOf(page: Page, text: string) {
-  return page.locator(".terminal-touch-text").evaluate((mirror, needle) => {
-    const walker = document.createTreeWalker(mirror, NodeFilter.SHOW_TEXT);
+  return page.locator(".terminal-touch-rows").evaluate((rows, needle) => {
+    const walker = document.createTreeWalker(rows, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const index = node.textContent!.indexOf(needle);
       if (index < 0) continue;
@@ -80,185 +193,62 @@ function centreOf(page: Page, text: string) {
   }, text);
 }
 
-function touchEvent(page: Page, type: string, x: number, y: number) {
+/**
+ * Dispatches a touch pointer event at a point and reports whether a listener
+ * cancelled it or captured the pointer, which would take the touch from the
+ * browser's own selection.
+ */
+function touchEvent(page: Page, type: string, x: number, y: number, pointerId = 7) {
   return page.evaluate(
-    ([eventType, clientX, clientY]) => {
-      // A dispatched event has no live pointer to capture; real touches do.
-      Element.prototype.setPointerCapture = () => {};
+    ([eventType, clientX, clientY, id]) => {
+      let captured = false;
+      const original = Element.prototype.setPointerCapture;
+      Element.prototype.setPointerCapture = () => {
+        captured = true;
+      };
       const target = document.elementFromPoint(clientX as number, clientY as number)!;
-      target.dispatchEvent(
-        new PointerEvent(eventType as string, {
-          bubbles: true,
-          cancelable: true,
-          pointerId: 7,
-          pointerType: "touch",
-          clientX: clientX as number,
-          clientY: clientY as number,
-        }),
-      );
-    },
-    [type, x, y],
-  );
-}
-
-test("no floating Select text pill covers the terminal", async ({ page }) => {
-  await connect(page);
-  await expect(page.locator(".terminal-select-button")).toHaveCount(0);
-  await expect(page.locator(".terminal-host > .terminal-select-button")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Select text" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Actions" }).tap();
-  await expect(page.getByRole("button", { name: "Select text" })).toBeVisible();
-});
-
-test("the selectable text layer mirrors the live rows and hides from screen readers", async ({
-  page,
-}) => {
-  await connect(page);
-  await typeInShell(page, "mirrored");
-  await expect(page.locator(".terminal-touch-text")).toContainText("mirrored");
-  await expect(page.locator(".terminal-touch-text")).toHaveAttribute("aria-hidden", "true");
-
-  const same = await page.evaluate(() => {
-    const live = Array.from(document.querySelectorAll(".xterm-rows > div"));
-    const copy = Array.from(document.querySelectorAll(".terminal-touch-text > div"));
-    const font = (element: Element) => {
-      const style = getComputedStyle(element);
-      return [style.fontFamily, style.fontSize, style.lineHeight].join("|");
-    };
-    return {
-      rows: [live.length, copy.length],
-      sameFont:
-        font(document.querySelector(".xterm-rows")!) ===
-        font(document.querySelector(".terminal-touch-text")!),
-      heights: live.map((row, i) => [
-        row.getBoundingClientRect().height,
-        copy[i]!.getBoundingClientRect().height,
-      ]),
-      tops: live.map((row, i) => [
-        Math.round(row.getBoundingClientRect().top),
-        Math.round(copy[i]!.getBoundingClientRect().top),
-      ]),
-      textWidth: (() => {
-        const rangeOf = (root: Element) => {
-          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-            const index = node.textContent!.indexOf("mirrored");
-            if (index < 0) continue;
-            const range = document.createRange();
-            range.setStart(node, index);
-            range.setEnd(node, index + 8);
-            const box = range.getBoundingClientRect();
-            return [Math.round(box.left), Math.round(box.width), Math.round(box.top)];
-          }
-          return null;
-        };
-        return [
-          rangeOf(document.querySelector(".xterm-rows")!),
-          rangeOf(document.querySelector(".terminal-touch-text")!),
-        ];
-      })(),
-    };
-  });
-  expect(same.rows[1]).toBe(same.rows[0]);
-  expect(same.sameFont).toBe(true);
-  for (const [a, b] of same.heights) expect(b).toBeCloseTo(a!, 1);
-  for (const [a, b] of same.tops) expect(b).toBe(a);
-  expect(same.textWidth[1]).toEqual(same.textWidth[0]);
-});
-
-test("long press on visible text creates a DOM selection in the text layer", async ({ page }) => {
-  await connect(page);
-  // Off the prompt row, which is the input field kept for Paste. The test
-  // server echoes Enter as a bare CR, so Ctrl+J adds the line feed.
-  await typeInShell(page, "selectme");
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Control+J");
-  await expect(page.locator(".terminal-touch-text")).toContainText("selectme");
-
-  const point = await centreOf(page, "selectme");
-  await touchEvent(page, "pointerdown", point.x, point.y);
-  await expect
-    .poll(() => page.evaluate(() => document.getSelection()?.toString()), {
-      timeout: 3_000,
-    })
-    .toContain("selectme");
-  const inMirror = await page.evaluate(() =>
-    document.querySelector(".terminal-touch-text")!.contains(document.getSelection()!.anchorNode),
-  );
-  expect(inMirror).toBe(true);
-  await touchEvent(page, "pointerup", point.x, point.y);
-});
-
-test("long press on empty space selects nothing", async ({ page }) => {
-  await connect(page);
-  await typeInShell(page, "left");
-  await expect(page.locator(".terminal-touch-text")).toContainText("left");
-  const box = (await page.locator(".xterm-screen").boundingBox())!;
-  const point = await centreOf(page, "left");
-  await touchEvent(page, "pointerdown", box.x + box.width - 6, point.y);
-  await page.waitForTimeout(900);
-  expect(await page.evaluate(() => document.getSelection()?.toString())).toBe("");
-  await touchEvent(page, "pointerup", box.x + box.width - 6, point.y);
-});
-
-test("a tap on text still focuses the terminal", async ({ page }) => {
-  await connect(page);
-  await typeInShell(page, "tapme");
-  await expect(page.locator(".terminal-touch-text")).toContainText("tapme");
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await expect(page.locator(".xterm-helper-textarea")).not.toBeFocused();
-  const point = await centreOf(page, "tapme");
-  await page.touchscreen.tap(point.x, point.y);
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
-  expect(await page.evaluate(() => document.getSelection()?.toString())).toBe("");
-});
-
-test("a tap on empty space focuses the terminal", async ({ page }) => {
-  await connect(page);
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  const box = (await page.locator(".xterm-screen").boundingBox())!;
-  await page.touchscreen.tap(box.x + box.width - 6, box.y + box.height - 6);
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
-});
-
-async function pasteInto(page: Page, text: string) {
-  await page.locator(".xterm-helper-textarea").evaluate((textarea, value) => {
-    (textarea as HTMLTextAreaElement).focus();
-    const data = new DataTransfer();
-    data.setData("text/plain", value);
-    textarea.dispatchEvent(
-      new ClipboardEvent("paste", {
-        clipboardData: data,
+      const event = new PointerEvent(eventType as string, {
         bubbles: true,
         cancelable: true,
-      }),
-    );
-  }, text);
+        pointerId: id as number,
+        pointerType: "touch",
+        clientX: clientX as number,
+        clientY: clientY as number,
+      });
+      target.dispatchEvent(event);
+      Element.prototype.setPointerCapture = original;
+      return {
+        onHost: !!target.closest(".terminal-touch-text"),
+        prevented: event.defaultPrevented,
+        captured,
+      };
+    },
+    [type, x, y, pointerId],
+  );
 }
-
-test("a paste event sends the text to the session once", async ({ page }) => {
-  await connect(page);
-  await pasteInto(page, "plain-paste");
-  // The test server echoes what it receives, so a double send would show twice.
-  await expect(page.locator(".xterm-rows")).toContainText("plain-paste");
-  await page.waitForTimeout(300);
-  expect(await page.locator(".xterm-rows").textContent()).not.toContain("plain-pasteplain-paste");
-});
 
 test.describe("tablet", () => {
   test.use({ viewport: { width: 820, height: 1180 } });
 
-  test("swipe keys stand down while a native selection exists", async ({ page }) => {
+  test("swipe keys work over the editing host and stand down for a native selection", async ({
+    page,
+  }) => {
     await connect(page);
     await typeInShell(page, "ab");
     await expect(page.locator(".terminal-touch-text")).toContainText("ab");
     const point = await centreOf(page, "ab");
 
     const swipe = async () => {
-      await touchEvent(page, "pointerdown", point.x + 100, point.y + 120);
-      await touchEvent(page, "pointermove", point.x + 160, point.y + 120);
-      await touchEvent(page, "pointermove", point.x + 240, point.y + 120);
-      await touchEvent(page, "pointerup", point.x + 240, point.y + 120);
+      const results = [
+        await touchEvent(page, "pointerdown", point.x + 100, point.y + 120),
+        await touchEvent(page, "pointermove", point.x + 160, point.y + 120),
+        await touchEvent(page, "pointermove", point.x + 240, point.y + 120),
+        await touchEvent(page, "pointerup", point.x + 240, point.y + 120),
+      ];
+      // The host keeps the browser's defaults: nothing cancelled or captured.
+      for (const result of results) {
+        expect(result).toEqual({ onHost: true, prevented: false, captured: false });
+      }
     };
 
     // Control: with no selection a right swipe sends Tab, which the echo shows as a gap.
@@ -266,140 +256,33 @@ test.describe("tablet", () => {
     await page.keyboard.type("Y");
     await expect(page.locator(".xterm-rows")).toContainText(/ab\s+Y/);
 
+    // A touch the browser takes over (pointercancel) sends nothing.
+    await touchEvent(page, "pointerdown", point.x + 100, point.y + 120);
+    await touchEvent(page, "pointercancel", point.x + 100, point.y + 120);
+    await touchEvent(page, "pointermove", point.x + 240, point.y + 120);
+    await touchEvent(page, "pointerup", point.x + 240, point.y + 120);
+
     await page.evaluate(() => {
-      const mirror = document.querySelector(".terminal-touch-text")!;
+      const rows = document.querySelector(".terminal-touch-rows")!;
       const range = document.createRange();
-      range.selectNodeContents(mirror.firstElementChild!);
+      range.selectNodeContents(rows.firstElementChild!);
       document.getSelection()!.removeAllRanges();
       document.getSelection()!.addRange(range);
     });
     await swipe();
+    // A tap dismisses a native selection to a caret.
+    await page.evaluate(() => document.getSelection()!.collapseToEnd());
     await typeInShell(page, "Z");
     await expect(page.locator(".xterm-rows")).toContainText(/ab\s+YZ/);
   });
 });
 
 test.describe("desktop", () => {
-  test.use({
-    hasTouch: false,
-    isMobile: false,
-    viewport: { width: 1280, height: 800 },
-  });
+  test.use({ hasTouch: false, isMobile: false, viewport: { width: 1280, height: 800 } });
 
-  test("keeps xterm's own selection and adds no text layer", async ({ page }) => {
+  test("keeps xterm's own selection and adds no editable layer", async ({ page }) => {
     await connect(page, false);
     await expect(page.locator(".terminal-touch-text")).toHaveCount(0);
     await expect(page.locator(".terminal-host--touch")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Select text" })).toHaveCount(0);
   });
-});
-
-test("the input field covers the whole cursor row and nothing else", async ({ page }) => {
-  await connect(page);
-  await typeInShell(page, "rowcheck");
-  await page.locator(".xterm-screen").tap();
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
-
-  const layout = await page.evaluate(() => {
-    const field = document
-      .querySelector<HTMLElement>(".xterm-helper-textarea")!
-      .getBoundingClientRect();
-    const screen = document.querySelector<HTMLElement>(".xterm-screen")!.getBoundingClientRect();
-    const row = document.querySelector<HTMLElement>(".xterm-rows > div")!.getBoundingClientRect();
-    const hitAbove = document.elementFromPoint(
-      screen.left + screen.width / 2,
-      field.top - row.height * 1.5,
-    );
-    const hitPrompt = document.elementFromPoint(screen.left + 4, field.top + field.height / 2);
-    return {
-      fieldHeight: field.height,
-      rowHeight: row.height,
-      fieldLeft: field.left,
-      fieldRight: field.right,
-      screenLeft: screen.left,
-      screenRight: screen.right,
-      aboveIsField: !!hitAbove?.closest(".xterm-helper-textarea"),
-      promptIsField: !!hitPrompt?.closest(".xterm-helper-textarea"),
-      opacity: getComputedStyle(document.querySelector(".xterm-helper-textarea")!).opacity,
-    };
-  });
-  expect(layout.fieldHeight).toBeCloseTo(layout.rowHeight, 0);
-  // The whole prompt row is the field, so a long press there offers Paste.
-  expect(Math.abs(layout.fieldLeft - layout.screenLeft)).toBeLessThanOrEqual(1);
-  expect(layout.promptIsField).toBe(true);
-  // iOS WebKit shows no caret, handles, Copy, or Paste while the focused field
-  // has near-zero opacity, so the field stays opaque and hides by colour.
-  expect(layout.opacity).toBe("1");
-  expect(Math.abs(layout.fieldRight - layout.screenRight)).toBeLessThanOrEqual(1);
-  expect(layout.aboveIsField).toBe(false);
-});
-
-test("a selection in the text layer keeps the keyboard field focused", async ({ page }) => {
-  // On an iPhone, blurring the field cleared a selection Safari had just made
-  // with the keyboard up, so the selection must not move focus.
-  await connect(page);
-  await typeInShell(page, "keepkeys");
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Control+J");
-  await expect(page.locator(".terminal-touch-text")).toContainText("keepkeys");
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
-
-  await page.evaluate(() => {
-    const text = document.querySelector(".terminal-touch-text > div")!;
-    const range = document.createRange();
-    range.selectNodeContents(text);
-    document.getSelection()!.removeAllRanges();
-    document.getSelection()!.addRange(range);
-  });
-  await page.waitForTimeout(200);
-  await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
-  expect(await page.evaluate(() => document.getSelection()?.toString().length)).toBeGreaterThan(0);
-});
-
-test("touches on the text and the field are left to the browser's own long press", async ({
-  page,
-}) => {
-  await connect(page);
-  await typeInShell(page, "native");
-  await expect(page.locator(".terminal-touch-text")).toContainText("native");
-  const text = await centreOf(page, "native");
-  const field = await page.locator(".xterm-helper-textarea").evaluate((el) => {
-    const box = el.getBoundingClientRect();
-    return { x: box.left + 4, y: box.top + box.height / 2 };
-  });
-  const prevented = await page.evaluate(
-    (points) =>
-      points.map(({ x, y }) => {
-        Element.prototype.setPointerCapture = () => {};
-        const target = document.elementFromPoint(x, y)!;
-        const down = new PointerEvent("pointerdown", {
-          bubbles: true,
-          cancelable: true,
-          pointerId: 9,
-          pointerType: "touch",
-          clientX: x,
-          clientY: y,
-        });
-        target.dispatchEvent(down);
-        target.dispatchEvent(
-          new PointerEvent("pointercancel", { bubbles: true, pointerId: 9, pointerType: "touch" }),
-        );
-        return down.defaultPrevented;
-      }),
-    [text, field],
-  );
-  expect(prevented).toEqual([false, false]);
-});
-
-test("a long press on the prompt row selects nothing, leaving it for Paste", async ({ page }) => {
-  await connect(page);
-  await typeInShell(page, "promptrow");
-  const field = await page.locator(".xterm-helper-textarea").evaluate((el) => {
-    const box = el.getBoundingClientRect();
-    return { x: box.left + 4, y: box.top + box.height / 2 };
-  });
-  await touchEvent(page, "pointerdown", field.x, field.y);
-  await page.waitForTimeout(900);
-  expect(await page.evaluate(() => document.getSelection()?.toString())).toBe("");
-  await touchEvent(page, "pointerup", field.x, field.y);
 });

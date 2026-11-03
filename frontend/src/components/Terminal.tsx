@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties } from "react";
-import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
+import { Terminal as XTerm, type IMarker, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import {
   classifyGesture,
@@ -14,12 +14,13 @@ import {
   type IOSDevice,
 } from "../terminalFont.js";
 import { resizeKeepingSelection } from "../terminalSelection.js";
-import { snapshotTerminalText } from "../terminalSnapshot.js";
 import { loadTerminalFont } from "../terminalFonts.js";
 import {
   attachTouchTextLayer,
-  pasteTerminalText,
-  selectWordAt,
+  bufferRange,
+  recordTypedText,
+  selectionEditBytes,
+  syncVisibleRows,
   type TouchTextLayer,
 } from "../terminalTouch.js";
 import "@xterm/xterm/css/xterm.css";
@@ -35,15 +36,22 @@ export interface TerminalControls {
   applicationCursorMode: () => boolean;
   /** The text the user has selected in the terminal, empty when none. */
   getSelection: () => string;
-  /** Captures the active terminal buffer for a read-only text view. */
-  snapshotText: () => string;
   /** Inserts text as if pasted, honouring the terminal's bracketed-paste mode. */
   paste: (text: string) => void;
+  /**
+   * Reports bytes that reached the session from any source (typing, key bar,
+   * paste), so touch selection edits know the current command's sent text.
+   */
+  noteSentInput: (data: string) => void;
 }
 
 export interface TerminalProps {
   onReady: (controls: TerminalControls) => void;
-  onInput: (data: string) => void;
+  /**
+   * Bytes for the session. `raw` marks bytes the terminal generated to replay a
+   * touch selection edit, which armed key bar modifiers must not change.
+   */
+  onInput: (data: string, raw?: boolean) => void;
   onResize: (cols: number, rows: number) => void;
   /** Reports terminal focus, which on a phone is the on-screen keyboard being up. */
   onFocusChange?: (focused: boolean) => void;
@@ -76,6 +84,8 @@ export function Terminal({
   const previousFontSizeRef = useRef(fontSize);
   const phoneScreenRef = useRef(phoneScreen);
   phoneScreenRef.current = phoneScreen;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   // The terminal is built once, so the setup effect reads the current callback
   // through a ref rather than closing over the one it was mounted with.
   const onFocusChangeRef = useRef(onFocusChange);
@@ -120,24 +130,86 @@ export function Terminal({
     termRef.current = term;
     fitRef.current = fit;
 
-    const dataSubscription = term.onData(onInput);
-    const resizeSubscription = term.onResize(({ cols, rows }) => onResize(cols, rows));
+    let rawInput = false;
+    const dataSubscription = term.onData((data) => onInput(data, rawInput));
+    const sendRaw = (bytes: string) => {
+      rawInput = true;
+      try {
+        term.input(bytes);
+      } finally {
+        rawInput = false;
+      }
+    };
+    let lastCols = term.cols;
+    const resizeSubscription = term.onResize(({ cols, rows }) => {
+      // Reflow moves the command to other cells; the tracked columns no longer hold.
+      if (cols !== lastCols) clearInputStart();
+      lastCols = cols;
+      onResize(cols, rows);
+    });
     const selectionSubscription = term.onSelectionChange(() =>
       onSelectionChangeRef.current?.(term.hasSelection()),
     );
-    onReady({
+    let editableMirror: HTMLElement | null = null;
+    // Markers keep the input row right when scrollback is trimmed.
+    type CursorMark = { marker: IMarker; col: number };
+    let inputStart: CursorMark | null = null;
+    let recordedText: string | null = "";
+    const markCursor = (): CursorMark => ({
+      marker: term.registerMarker(0),
+      col: term.buffer.active.cursorX,
+    });
+    const pointOf = (mark: CursorMark | null) =>
+      mark && !mark.marker.isDisposed ? { row: mark.marker.line, col: mark.col } : null;
+    function clearInputStart() {
+      inputStart?.marker.dispose();
+      inputStart = null;
+      recordedText = "";
+    }
+    let lastSentAt = Number.NEGATIVE_INFINITY;
+    let pasteText = (text: string) => term.paste(text);
+    const readyControls: TerminalControls = {
       write: (data) => term.write(data),
       reset: () => term.reset(),
-      focus: () => term.focus(),
-      blur: () => term.blur(),
+      focus: () => {
+        if (editableMirror) {
+          editableMirror.setAttribute("inputmode", "text");
+          editableMirror.focus();
+          onFocusChangeRef.current?.(true);
+        } else term.focus();
+      },
+      blur: () => {
+        if (editableMirror) {
+          editableMirror.setAttribute("inputmode", "none");
+          editableMirror.blur();
+          onFocusChangeRef.current?.(false);
+        } else term.blur();
+      },
       applicationCursorMode: () => isApplicationCursorMode(term),
       getSelection: () => term.getSelection(),
-      snapshotText: () => snapshotTerminalText(term.buffer.active),
-      paste: (text) => term.paste(text),
+      paste: (text) => pasteText(text),
+      noteSentInput: (data) => {
+        lastSentAt = performance.now();
+        if (["\r", "\x03", "\x04", "\x15"].includes(data)) {
+          clearInputStart();
+          return;
+        }
+        const next = recordTypedText(recordedText, data);
+        if (!inputStart && next && term.buffer.active.type === "normal") {
+          inputStart = markCursor();
+        }
+        recordedText = next;
+      },
+    };
+    // Output nobody asked for (a background job, a new prompt) may move or
+    // replace the command line, so the tracked input start no longer holds.
+    // Echo and completion output follow input well within this window.
+    const writeSubscription = term.onWriteParsed(() => {
+      if (performance.now() - lastSentAt > UNPROMPTED_OUTPUT_MS) clearInputStart();
     });
+    const bufferSubscription = term.buffer.onBufferChange(clearInputStart);
 
-    // The hidden textarea is the element that holds focus, and on a phone the
-    // on-screen keyboard follows it.
+    // Desktop uses xterm's textarea; touch uses the editable mirror for focus.
     const textarea = term.textarea;
     const reportFocus = () => onFocusChangeRef.current?.(true);
     const reportBlur = () => onFocusChangeRef.current?.(false);
@@ -160,20 +232,167 @@ export function Terminal({
     void document.fonts.ready.then(fitTerminal);
     fitTerminal();
 
-    // A touch device gets a selectable copy of the visible rows and an editable
-    // field under the finger, so its own long-press Copy and Paste callouts work
-    // on the live terminal. Mouse devices keep xterm's own selection.
+    // A touch device gets one editable, selectable copy of the visible rows, so
+    // its own selection, Copy, and Paste work on the live terminal. Mouse devices
+    // keep xterm's own selection and textarea.
     const touchHost = window.matchMedia?.("(pointer: coarse)").matches ?? false;
     const textLayer = touchHost ? attachTouchTextLayer(term) : null;
+    editableMirror = textLayer?.mirror ?? null;
     const host = containerRef.current;
-    const pasteInto = (event: Event) =>
-      pasteTerminalText(event as ClipboardEvent, term.paste.bind(term));
+    const mirror = editableMirror;
+    // The bytes that delete `range` through the line editor, or null when it is
+    // not certainly inside the current command input (see selectionEditBytes).
+    const editFor = (range: AbstractRange | undefined): string | null => {
+      const top = textLayer?.rowsTop();
+      if (!textLayer || !range || top === null || top === undefined) return null;
+      const span = bufferRange(term, textLayer.rows, top, range);
+      return span
+        ? selectionEditBytes(
+            term,
+            pointOf(inputStart),
+            span.start,
+            span.end,
+            isApplicationCursorMode(term),
+            recordedText,
+          )
+        : null;
+    };
+    const selectionEdit = () => {
+      const selection = document.getSelection();
+      return selection?.rangeCount ? editFor(selection.getRangeAt(0)) : null;
+    };
+    if (textLayer) {
+      // Pasting over selected command input replaces it. Any selection is then
+      // dropped, because the frozen copy would otherwise sit over new output.
+      pasteText = (text) => {
+        const replace = textLayer.hasSelection() ? selectionEdit() : null;
+        if (replace) sendRaw(replace);
+        term.paste(text);
+        textLayer.releaseSelection();
+      };
+    }
+    const pasteInto = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const text = (event as ClipboardEvent).clipboardData?.getData("text/plain");
+      if (activeRef.current && text) pasteText(text);
+    };
     if (textLayer) {
       host.classList.add("terminal-host--touch");
+      if (textarea) textarea.tabIndex = -1;
       // Capture phase, so xterm's own paste listener on the textarea does not
       // also send the text.
       host.addEventListener("paste", pasteInto, true);
     }
+
+    const onBeforeInput = (event: InputEvent) => {
+      event.preventDefault();
+      if (!activeRef.current) return;
+      const type = event.inputType;
+      const isInsert = type === "insertText" || type === "insertReplacementText";
+      const isEnter = type === "insertParagraph" || type === "insertLineBreak";
+      const selection = document.getSelection();
+      if (selection && !selection.isCollapsed) {
+        // A selection inside the command input is deleted first. Elsewhere a
+        // delete sends nothing, while typing and Enter drop the selection and
+        // go to the cursor as usual.
+        const bytes = type.startsWith("delete") || isInsert ? selectionEdit() : null;
+        if (type.startsWith("delete") && !bytes) return;
+        if (!type.startsWith("delete") && !isInsert && !isEnter) return;
+        if (bytes) sendRaw(bytes);
+        textLayer?.releaseSelection();
+        if (isInsert && event.data) term.input(event.data);
+        else if (isEnter) term.input("\r");
+        return;
+      }
+      if (type === "insertReplacementText") {
+        // A predictive or spelling replacement names the text it replaces. Send
+        // it only when that text can be deleted first; with no target, or one
+        // outside the typed command, send nothing so no word is doubled.
+        const target = event.getTargetRanges()[0];
+        const bytes = target && !target.collapsed ? editFor(target) : null;
+        if (!bytes) return;
+        sendRaw(bytes);
+        if (event.data) term.input(event.data);
+      } else if (type === "insertText") {
+        if (event.data) term.input(event.data);
+      } else if (isEnter) {
+        term.input("\r");
+      } else if (type === "deleteContentBackward") {
+        term.input("\x7f");
+      } else if (type === "deleteWordBackward") {
+        // Option+Backspace, and iOS's held Backspace once it deletes by word:
+        // ESC DEL is what xterm sends for Alt+Backspace.
+        term.input("\x1b\x7f");
+      } else if (type === "deleteSoftLineBackward" || type === "deleteHardLineBackward") {
+        // Command+Backspace: readline's unix-line-discard.
+        term.input("\x15");
+      }
+    };
+    // The browser edited the copy anyway (an uncancellable input); put the
+    // terminal's rows back, except while an IME is still composing in them.
+    const restoreMirror = (event?: Event) => {
+      if (event instanceof InputEvent && event.isComposing) return;
+      const rows = host.querySelector(".xterm-rows");
+      if (rows && textLayer) syncVisibleRows(rows, textLayer.rows);
+    };
+    const onCompositionEnd = (event: CompositionEvent) => {
+      if (activeRef.current && event.data) term.input(event.data);
+      restoreMirror();
+    };
+    const stopXtermMouseFocus = (event: MouseEvent) => event.stopPropagation();
+    // Keys that only the browser's text input can turn into characters stay with
+    // it: IME and soft-keyboard keys (229, Unidentified, Process), dead keys, and
+    // Option characters where xterm reads the platform as a Mac (iPadOS reports
+    // MacIntel). There xterm treats Option as a third-level shift and waits for
+    // the text the cancelled event would have produced, so forwarding sends nothing.
+    const onHardwareKey = (event: KeyboardEvent) => {
+      if (
+        event.isComposing ||
+        event.keyCode === 229 ||
+        ["Dead", "Unidentified", "Process"].includes(event.key) ||
+        (event.metaKey && (event.key.toLowerCase() === "c" || event.key.toLowerCase() === "v")) ||
+        (event.key.length === 1 &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          (!event.altKey || MAC_PLATFORM)) ||
+        event.key === "Enter" ||
+        event.key === "Backspace" ||
+        ["Shift", "Control", "Alt", "Meta"].includes(event.key)
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      const forwarded = new KeyboardEvent("keydown", {
+        key: event.key,
+        code: event.code,
+        location: event.location,
+        repeat: event.repeat,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        cancelable: true,
+      });
+      Object.defineProperty(forwarded, "keyCode", { value: event.keyCode });
+      textarea?.dispatchEvent(forwarded);
+    };
+    // Native focus changes (a tap on another control, iOS's hide-keyboard key)
+    // reach the key bar's keyboard toggle. A focused host with inputmode "none"
+    // has no keyboard up, so it reports as unfocused.
+    const onMirrorFocus = () =>
+      onFocusChangeRef.current?.(mirror?.getAttribute("inputmode") === "text");
+    const onMirrorBlur = () => {
+      mirror?.setAttribute("inputmode", "none");
+      onFocusChangeRef.current?.(false);
+    };
+    mirror?.addEventListener("focus", onMirrorFocus);
+    mirror?.addEventListener("blur", onMirrorBlur);
+    mirror?.addEventListener("beforeinput", onBeforeInput);
+    mirror?.addEventListener("input", restoreMirror);
+    mirror?.addEventListener("compositionend", onCompositionEnd);
+    mirror?.addEventListener("mousedown", stopXtermMouseFocus);
+    mirror?.addEventListener("keydown", onHardwareKey);
 
     const detachGestures = attachGestures(host, {
       term,
@@ -182,6 +401,7 @@ export function Terminal({
       smallScreenIOS: isSmallScreenIOS(currentIOSDevice()),
       textLayer,
     });
+    onReady(readyControls);
 
     return () => {
       cancelAnimationFrame(animationFrame);
@@ -190,6 +410,13 @@ export function Terminal({
       textarea?.removeEventListener("focus", reportFocus);
       textarea?.removeEventListener("blur", reportBlur);
       detachGestures();
+      mirror?.removeEventListener("focus", onMirrorFocus);
+      mirror?.removeEventListener("blur", onMirrorBlur);
+      mirror?.removeEventListener("beforeinput", onBeforeInput);
+      mirror?.removeEventListener("input", restoreMirror);
+      mirror?.removeEventListener("compositionend", onCompositionEnd);
+      mirror?.removeEventListener("mousedown", stopXtermMouseFocus);
+      mirror?.removeEventListener("keydown", onHardwareKey);
       if (textLayer) {
         host.removeEventListener("paste", pasteInto, true);
         host.classList.remove("terminal-host--touch");
@@ -198,6 +425,9 @@ export function Terminal({
       dataSubscription.dispose();
       resizeSubscription.dispose();
       selectionSubscription.dispose();
+      writeSubscription.dispose();
+      bufferSubscription.dispose();
+      clearInputStart();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -265,7 +495,10 @@ export function Terminal({
   useEffect(() => {
     if (!termRef.current) return;
     termRef.current.options.disableStdin = !active;
-    if (termRef.current.textarea) termRef.current.textarea.tabIndex = active ? 0 : -1;
+    if (termRef.current.textarea) {
+      termRef.current.textarea.tabIndex =
+        active && !containerRef.current?.classList.contains("terminal-host--touch") ? 0 : -1;
+    }
   }, [active]);
 
   return (
@@ -287,24 +520,26 @@ interface GestureTargets {
   onInput: (data: string) => void;
   isPhoneScreen: () => boolean;
   smallScreenIOS: boolean;
-  /** Present on touch devices: the selectable copy of the visible rows. */
+  /** Present on touch devices: the editable copy of the visible rows. */
   textLayer: TouchTextLayer | null;
 }
 
 /**
- * Recognises tablet touch gestures for shell keys; phone drags only scroll.
- * Pointer events cover touch and pen without claiming the mouse. A long press
- * belongs to the browser: it selects text in the selectable copy of the rows or
- * shows Paste on the editable field beneath them. While such a selection exists
- * every gesture here stands down, so nothing reaches the shell.
+ * Recognises tablet touch gestures for shell keys (swipes, history flicks) and
+ * drags for scrollback; phone one-finger drags only scroll. Pointer events cover
+ * touch and pen without claiming the mouse.
  *
- * A tap focuses the terminal from inside the pointerup handler. Safari opens the
- * on-screen keyboard only for a focus() made during a user gesture, and xterm's
- * own focus happens in a synthesised mousedown, which is a weaker claim to that
- * gesture; focusing here makes a tap raise the keyboard on iOS.
+ * Touches on the editable host are only watched: no preventDefault and no
+ * pointer capture, so the browser's taps, caret, long press, and selection
+ * handles work as usual. A native selection or a pointercancel (the browser
+ * taking the touch over) ends the gesture before it sends or scrolls anything,
+ * and a tap there is left to the browser to focus the host.
+ *
+ * A tap outside the host focuses the terminal from inside the pointerup
+ * handler. Safari opens the on-screen keyboard only for a focus() made during a
+ * user gesture, and xterm's own focus happens in a synthesised mousedown, which
+ * is a weaker claim to that gesture.
  */
-const LONG_PRESS_MS = 600;
-
 function attachGestures(element: HTMLElement, targets: GestureTargets): () => void {
   const isPhoneScreen = targets.isPhoneScreen;
   const active = new Map<number, { x: number; y: number }>();
@@ -322,11 +557,18 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   let twoFingerRemainder = 0;
   let oneFingerY: number | null = null;
   let oneFingerRemainder = 0;
-  let longPressTimer = 0;
+  // The gesture began on the editable host, whose defaults stay with the browser.
+  let nativeTouch = false;
 
-  const cancelLongPress = () => {
-    window.clearTimeout(longPressTimer);
-    longPressTimer = 0;
+  const cancelGesture = () => {
+    active.clear();
+    start = null;
+    multiTouch = false;
+    handled = false;
+    twoFingerY = null;
+    twoFingerRemainder = 0;
+    oneFingerY = null;
+    oneFingerRemainder = 0;
   };
 
   // Recognises the swipe from the movement so far rather than waiting for the
@@ -355,16 +597,15 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   const onPointerDown = (event: PointerEvent) => {
     if (event.pointerType === "mouse") return;
     // Let the browser keep or dismiss its selection; no swipe, scroll, or tap.
-    if (targets.textLayer?.hasSelection()) return;
-
-    // A touch on the selectable text or the input field belongs to Safari's own
-    // long press (selection and Copy, or Paste); preventing it would stop that.
-    // Elsewhere, keep Safari from turning a long press into page movement or its
-    // callout, and capture so a drag stays alive when a thumb strays outside.
-    const target = event.target instanceof Element ? event.target : null;
-    const onField = !!target?.closest(".xterm-helper-textarea");
-    const nativeTouch =
-      !!targets.textLayer && (onField || !!target?.closest(".terminal-touch-text"));
+    if (targets.textLayer?.hasSelection()) {
+      cancelGesture();
+      return;
+    }
+    const onHost =
+      !!targets.textLayer &&
+      event.target instanceof Node &&
+      targets.textLayer.mirror.contains(event.target);
+    if (active.size === 0) nativeTouch = onHost;
     if (!nativeTouch) {
       event.preventDefault();
       element.setPointerCapture?.(event.pointerId);
@@ -384,21 +625,10 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       handled = false;
       oneFingerY = event.clientY;
       oneFingerRemainder = 0;
-      cancelLongPress();
-      const { clientX, clientY } = event;
-      longPressTimer = window.setTimeout(() => {
-        const layer = targets.textLayer;
-        // The prompt row is the input field, kept for Paste.
-        if (!layer || onField) return;
-        handled = true;
-        // Touch Safari selects by itself first; select the word only when it did not.
-        if (!layer.hasSelection()) selectWordAt(layer.mirror, clientX, clientY);
-      }, LONG_PRESS_MS);
     } else {
       // A second finger explicitly drives scrollback, never shell input.
       start = null;
       multiTouch = true;
-      cancelLongPress();
       if (active.size === 2) {
         twoFingerY = activeCentroidY();
         twoFingerRemainder = 0;
@@ -408,12 +638,12 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
 
   const onPointerMove = (event: PointerEvent) => {
     if (!active.has(event.pointerId)) return;
-    active.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (targets.textLayer?.hasSelection()) return;
-
-    if (start && !isTap({ dx: event.clientX - start.x, dy: event.clientY - start.y })) {
-      cancelLongPress();
+    if (targets.textLayer?.hasSelection()) {
+      cancelGesture();
+      return;
     }
+    active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
     recogniseInFlight(event);
     if (!multiTouch && active.size === 1 && oneFingerY !== null && !handled && start) {
       oneFingerRemainder += event.clientY - oneFingerY;
@@ -433,7 +663,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
           oneFingerRemainder += lines * rowHeight;
         }
       }
-      event.preventDefault();
+      if (!nativeTouch) event.preventDefault();
       return;
     }
     if (!multiTouch || active.size !== 2 || twoFingerY === null) return;
@@ -447,7 +677,7 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       targets.term.scrollLines(lines);
       twoFingerRemainder += lines * rowHeight;
     }
-    event.preventDefault();
+    if (!nativeTouch) event.preventDefault();
   };
 
   const onPointerEnd = (event: PointerEvent) => {
@@ -456,7 +686,6 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
     if (element.hasPointerCapture?.(event.pointerId)) {
       element.releasePointerCapture(event.pointerId);
     }
-    cancelLongPress();
 
     // The browser took the touch over, so it completes nothing: no swipe, tap,
     // or selection change comes from where it happened to stop.
@@ -513,7 +742,12 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
       targets.onInput(gestureToInput(gesture, isApplicationCursorMode(targets.term)));
       return;
     }
-    if (isTap(sample)) targets.term.focus();
+    if (isTap(sample) && !nativeTouch) {
+      // On touch this keeps the current keyboard intent (inputmode); the host's
+      // focus listener reports the change.
+      if (targets.textLayer) targets.textLayer.mirror.focus();
+      else targets.term.focus();
+    }
   };
 
   element.addEventListener("pointerdown", onPointerDown);
@@ -522,13 +756,18 @@ function attachGestures(element: HTMLElement, targets: GestureTargets): () => vo
   element.addEventListener("pointercancel", onPointerEnd);
 
   return () => {
-    cancelLongPress();
     element.removeEventListener("pointerdown", onPointerDown);
     element.removeEventListener("pointermove", onPointerMove);
     element.removeEventListener("pointerup", onPointerEnd);
     element.removeEventListener("pointercancel", onPointerEnd);
   };
 }
+
+/** Matches xterm's own Mac detection (`src/common/Platform.ts`), which iPadOS meets. */
+const MAC_PLATFORM = ["Macintosh", "MacIntel", "MacPPC", "Mac68K"].includes(navigator.platform);
+
+/** Output this long after the last sent byte is not an echo of it. */
+const UNPROMPTED_OUTPUT_MS = 1_000;
 
 function isViewportAtBottom(term: XTerm): boolean {
   return term.buffer.active.viewportY >= term.buffer.active.baseY;
