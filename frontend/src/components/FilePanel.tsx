@@ -911,6 +911,9 @@ export function FilePanel({
               id={pathId}
               value={pathInput}
               onChange={(event) => setPathInput(event.target.value)}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
             />
             <button type="submit" disabled={!files || loading || locked}>
               Open
@@ -1041,6 +1044,8 @@ export function FilePanel({
               type="search"
               placeholder="Filter files"
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
               spellCheck={false}
               value={filter}
               onChange={(event) => changeFilter(event.target.value)}

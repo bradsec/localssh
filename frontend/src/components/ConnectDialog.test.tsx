@@ -31,6 +31,15 @@ function vaultApi(overrides: Partial<VaultApi> = {}): VaultApi {
 beforeEach(() => localStorage.clear());
 
 describe("ConnectDialog", () => {
+  it("disables keyboard corrections for host and username", () => {
+    render(<ConnectDialog vault={vaultApi()} onConnect={vi.fn()} disabled={false} />);
+    for (const name of [/^host$/i, /^username$/i]) {
+      const input = screen.getByLabelText(name);
+      expect(input).toHaveAttribute("autocapitalize", "none");
+      expect(input).toHaveAttribute("autocorrect", "off");
+      expect(input).toHaveAttribute("spellcheck", "false");
+    }
+  });
   it("connects with a pasted private key", async () => {
     const onConnect = vi.fn();
     render(<ConnectDialog vault={vaultApi()} onConnect={onConnect} disabled={false} />);
